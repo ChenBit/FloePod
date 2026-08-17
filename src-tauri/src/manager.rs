@@ -111,13 +111,15 @@ pub fn current_settings(app: &AppHandle) -> Settings {
 
 pub fn apply_material(window: &WebviewWindow, material: &str) {
     use tauri::window::{Effect, EffectsBuilder};
-    let effects: Vec<Effect> = if material == "acrylic" {
-        vec![Effect::Acrylic]
+    if material == "acrylic" {
+        let config = EffectsBuilder::new().effects([Effect::Acrylic]).build();
+        let _ = window.set_effects(Some(config));
     } else {
-        vec![]
-    };
-    let config = EffectsBuilder::new().effects(effects).build();
-    let _ = window.set_effects(Some(config));
+        // 纯半透明：必须显式清除之前叠加的亚克力。
+        // 传空 effects 列表时 Tauri 直接返回、不会清掉旧效果，
+        // 导致 Windows 上背景仍保持模糊不透明（无法透明）。
+        let _ = window.set_effects(None);
+    }
 }
 
 /// 面板定位：贴着展开后的浮匣；y 跟随鼠标（悬停唤起时）或屏幕居中。

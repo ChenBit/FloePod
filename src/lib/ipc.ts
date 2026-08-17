@@ -35,7 +35,7 @@ let mockSettings: import("@/types").Settings = {
   activeSceneId: 1,
   firstRunDone: true,
   hotkeys: { toggleBar: "Alt+Shift+F", collectClipboard: "Alt+Shift+S", openPanel: "Alt+Shift+P" },
-  version: "0.1.0-mock",
+  version: "0.2.0-mock",
   dataDir: "浏览器预览",
 };
 let mockScenes: import("@/types").Scene[] = [
@@ -84,7 +84,7 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
         items: mockItems,
         panelMode: "list",
         pendingDrop: null,
-        version: "0.1.0-mock",
+        version: "0.2.0-mock",
       });
     case "list_items":
       return ret(mockItems);

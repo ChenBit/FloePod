@@ -27,7 +27,7 @@ pnpm tauri dev        # 开发运行（Rust + Vite 联动）
 cargo test            # Rust 单测（在 src-tauri/ 下）
 pnpm build            # 前端类型检查 + 产物构建
 pnpm tauri build      # 发布构建（NSIS 安装包 + 裸 exe）
-node scripts/make-placeholder-icon.mjs   # 重新生成占位图标源图
+node scripts/make-placeholder-icon.mjs   # 重新生成占位图标源图（已被正式 logo 取代，仅保留）
 pnpm tauri icon app-icon.png             # 由源图生成全套图标
 ```
 
@@ -60,5 +60,5 @@ node scripts/package-portable.mjs
 ## 说明
 
 - 需要 WebView2 运行时（Windows 10/11 一般自带）
-- 图标当前为占位版本，与界面品牌图形同源；拿到正式图标后执行
-  `pnpm tauri icon <图标.png> && pnpm tauri build` 即可替换
+- 图标已替换为正式 FP Logo（`app-icon.png`，白底已抠除）；如需重新生成图标执行
+  `pnpm tauri icon app-icon.png && pnpm tauri build` 即可

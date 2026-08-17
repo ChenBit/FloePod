@@ -24,9 +24,9 @@
   --line-strong: oklch(0.82 0.008 230);
   --danger: oklch(0.55 0.19 25);
 
-  /* 窗口玻璃层（半透明窗口用） */
-  --glass: oklch(0.985 0.003 230 / 0.82);
-  --glass-strong: oklch(0.985 0.003 230 / 0.94);
+  /* 窗口玻璃层（半透明窗口用）：着色要克制，模糊交给系统亚克力 */
+  --glass: oklch(0.985 0.003 230 / 0.6);
+  --glass-strong: oklch(0.985 0.003 230 / 0.8);
   --glass-line: oklch(1 0 0 / 0.55);
   --glass-inner: oklch(1 0 0 / 0.5);
 
@@ -52,8 +52,8 @@
   --line-strong: oklch(0.4 0.012 230);
   --danger: oklch(0.68 0.17 25);
 
-  --glass: oklch(0.22 0.01 230 / 0.82);
-  --glass-strong: oklch(0.24 0.01 230 / 0.93);
+  --glass: oklch(0.22 0.01 230 / 0.6);
+  --glass-strong: oklch(0.24 0.01 230 / 0.8);
   --glass-line: oklch(1 0 0 / 0.12);
   --glass-inner: oklch(1 0 0 / 0.06);
 
