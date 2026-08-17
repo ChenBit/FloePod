@@ -19,9 +19,99 @@ import type {
 
 const inTauri = "__TAURI_INTERNALS__" in window;
 
+/** 浏览器开发模式的轻量 mock（无 Tauri 时保证 UI 可预览） */
+let mockItems: import("@/types").StagedItem[] = [];
+let mockSettings: import("@/types").Settings = {
+  stagingFolder: "D:\\浮匣暂存（浏览器预览）",
+  dropAction: "ask",
+  barForm: "strip",
+  edge: "left",
+  opacity: 0.85,
+  material: "acrylic",
+  hoverDelayMs: 120,
+  panelWidth: 380,
+  theme: "system",
+  autostart: false,
+  activeSceneId: 1,
+  firstRunDone: true,
+  hotkeys: { toggleBar: "Alt+Shift+F", collectClipboard: "Alt+Shift+S", openPanel: "Alt+Shift+P" },
+  version: "0.1.0-mock",
+  dataDir: "浏览器预览",
+};
+let mockScenes: import("@/types").Scene[] = [
+  { id: 1, name: "默认", sort: 0, createdAt: 1 },
+  { id: 2, name: "工作素材", sort: 1, createdAt: 2 },
+];
+if (!inTauri) {
+  mockItems = [
+    {
+      id: 1, sceneId: 1, kind: "file", stagingPath: "D:\\staging\\blueprint.webp",
+      originalPath: "C:\\src\\blueprint.webp", name: "蓝图参考.webp", ext: "webp", size: 245760, createdAt: Date.now() - 6e5,
+    },
+    {
+      id: 2, sceneId: 1, kind: "file", stagingPath: "D:\\staging\\需求说明.pdf",
+      originalPath: null, name: "需求说明.pdf", ext: "pdf", size: 512000, createdAt: Date.now() - 18e5,
+    },
+    {
+      id: 3, sceneId: 1, kind: "text", stagingPath: "D:\\staging\\会议要点.txt",
+      originalPath: null, name: "会议要点.txt", ext: "txt", size: 2048, createdAt: Date.now() - 4e6,
+    },
+    {
+      id: 4, sceneId: 2, kind: "folder", stagingPath: "D:\\staging\\素材包",
+      originalPath: "C:\\src\\素材包", name: "素材包", ext: null, size: 0, createdAt: Date.now() - 2e6,
+    },
+    {
+      id: 5, sceneId: 1, kind: "shortcut", stagingPath: "D:\\staging\\原型.fig - 快捷方式.lnk",
+      originalPath: "C:\\src\\原型.fig", name: "原型.fig - 快捷方式.lnk", ext: "lnk", size: 0, createdAt: Date.now() - 3e5,
+    },
+  ];
+}
+
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!inTauri) return mockInvoke<T>(cmd, args);
   const { invoke } = await import("@tauri-apps/api/core");
   return invoke<T>(cmd, args);
+}
+
+async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const seed = () => (mockItems = [...mockItems]);
+  const ret = (v: unknown) => v as T;
+  switch (cmd) {
+    case "get_bootstrap":
+      return ret({
+        settings: mockSettings,
+        scenes: mockScenes,
+        items: mockItems,
+        panelMode: "list",
+        pendingDrop: null,
+        version: "0.1.0-mock",
+      });
+    case "list_items":
+      return ret(mockItems);
+    case "list_scenes":
+      return ret(mockScenes);
+    case "save_settings":
+      mockSettings = { ...mockSettings, ...((args?.patch as object) ?? {}) };
+      return ret(mockSettings);
+    case "stage_text": {
+      const content = String(args?.content ?? "");
+      const item: import("@/types").StagedItem = {
+        id: Date.now(), sceneId: mockSettings.activeSceneId, kind: "text",
+        stagingPath: `D:\\staging\\文字 ${mockItems.length + 1}.txt`,
+        originalPath: null, name: `文字 ${mockItems.length + 1}.txt`, ext: "txt",
+        size: content.length, createdAt: Date.now(),
+      };
+      seed().push(item);
+      return ret(item);
+    }
+    case "create_scene":
+      return ret({ id: Date.now(), name: String(args?.name), sort: mockScenes.length, createdAt: Date.now() });
+    case "get_hotkey_defaults":
+      return ret(mockSettings.hotkeys);
+    default:
+      // 窗口类命令在浏览器里静默成功即可
+      return ret(undefined);
+  }
 }
 
 export const ipc = {

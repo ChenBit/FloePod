@@ -15,8 +15,7 @@ pub fn register(app: &AppHandle, s: &Settings) -> Result<(), String> {
         if combo.is_empty() {
             return Ok(());
         }
-        gs.clone()
-            .on_shortcut(combo, move |app, _shortcut, e| {
+        gs.on_shortcut(combo, move |app, _shortcut, e| {
                 if e.state() == ShortcutState::Pressed {
                     action(app);
                 }

@@ -16,7 +16,6 @@ export const useSettingsStore = defineStore("settings", {
 
   getters: {
     configured: (s) => !!s.settings?.stagingFolder,
-    activeItemsCount: (s) => s.settings,
   },
 
   actions: {
@@ -27,7 +26,7 @@ export const useSettingsStore = defineStore("settings", {
 
     apply(settings: Settings) {
       this.settings = settings;
-      this.dark = resolvedTheme(settings.theme);
+      this.dark = resolvedTheme(settings.theme) === "dark";
       document.documentElement.classList.toggle("dark", this.dark);
     },
 
@@ -40,7 +39,7 @@ export const useSettingsStore = defineStore("settings", {
     watchSystemTheme() {
       window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
         if (this.settings && this.settings.theme === "system") {
-          this.dark = resolvedTheme("system");
+          this.dark = resolvedTheme("system") === "dark";
           document.documentElement.classList.toggle("dark", this.dark);
         }
       });

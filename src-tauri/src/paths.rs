@@ -1,11 +1,10 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tauri::AppHandle;
-
 /// 数据目录解析：便携优先。
 /// exe 旁 `FloePodData` 可写则使用（真正的 U 盘便携）；否则回退 %APPDATA%\FloePod。
-pub fn resolve(app: &AppHandle) -> PathBuf {
+/// 不依赖 AppHandle，可在 Builder 阶段（窗口创建前）完成状态注册。
+pub fn resolve() -> PathBuf {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let portable = dir.join("FloePodData");
@@ -14,10 +13,8 @@ pub fn resolve(app: &AppHandle) -> PathBuf {
             }
         }
     }
-    let fallback = app
-        .path()
-        .app_data_dir()
-        .unwrap_or_else(|_| PathBuf::from("FloePodData"));
+    let base = std::env::var("APPDATA").unwrap_or_default();
+    let fallback = PathBuf::from(base).join("FloePod");
     let _ = fs::create_dir_all(&fallback);
     fallback
 }

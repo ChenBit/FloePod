@@ -16,11 +16,15 @@ pub fn create_shortcuts(pairs: &[(std::path::PathBuf, std::path::PathBuf)]) -> R
             "$s = $ws.CreateShortcut({o}); $s.TargetPath = {t}; $s.Save()\n"
         ));
     }
-    let status = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .creation_flags_win()
-        .output()
-        .map_err(|e| format!("启动 PowerShell 失败: {e}"))?;
+    let mut cmd = Command::new("powershell");
+    cmd.arg("-NoProfile").arg("-NonInteractive").arg("-Command").arg(&script);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // CREATE_NO_WINDOW，避免闪出控制台
+        cmd.creation_flags(0x0800_0000);
+    }
+    let status = cmd.output().map_err(|e| format!("启动 PowerShell 失败: {e}"))?;
     if !status.status.success() {
         return Err("创建快捷方式失败".to_string());
     }
@@ -29,23 +33,6 @@ pub fn create_shortcuts(pairs: &[(std::path::PathBuf, std::path::PathBuf)]) -> R
 
 fn ps_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
-}
-
-trait CreateFlags {
-    fn creation_flags_win(self) -> Self;
-}
-
-impl CreateFlags for Command {
-    #[cfg(windows)]
-    fn creation_flags_win(self) -> Self {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW，避免闪出控制台
-        self.creation_flags(0x0800_0000)
-    }
-    #[cfg(not(windows))]
-    fn creation_flags_win(self) -> Self {
-        self
-    }
 }
 
 /// 从目标文件名推导快捷方式显示名：`报告.docx` -> `报告 - 快捷方式.lnk`

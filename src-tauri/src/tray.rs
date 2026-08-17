@@ -10,10 +10,10 @@ use crate::state::AppState;
 
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app)?;
-    let icon = app
-        .default_window_icon()
-        .cloned()
-        .ok_or_else(|| "缺少应用图标".to_string())?;
+    let icon = match app.default_window_icon() {
+        Some(i) => i.clone(),
+        None => return Ok(()),
+    };
     TrayIconBuilder::with_id("tray")
         .icon(icon)
         .tooltip("浮匣 FloePod")

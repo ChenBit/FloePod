@@ -58,7 +58,6 @@ async function chooseFolder() {
 
 async function openStagingFolder() {
   if (!s.value?.stagingFolder) return;
-  const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
   /* 打开文件夹本身 */
   const { openPath } = await import("@tauri-apps/plugin-opener");
   await openPath(s.value.stagingFolder);

@@ -9,6 +9,7 @@ export const Events = {
 } as const;
 
 export async function listen<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  if (!("__TAURI_INTERNALS__" in window)) return () => undefined;
   const { listen: rawListen } = await import("@tauri-apps/api/event");
   const unlisten = await rawListen<T>(event, (e) => handler(e.payload));
   return unlisten;

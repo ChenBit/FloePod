@@ -1,5 +1,7 @@
 //! Win32 辅助：不抢焦点显示窗口、修饰键状态。
 
+use core::ffi::c_void;
+
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_MENU, VK_SHIFT,
 };
@@ -8,10 +10,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     SW_SHOWNOACTIVATE,
 };
 
-const PRESSED: i16 = -32768; // GetAsyncKeyState 高位为 1 时的返回值（i16 下溢表示）
-
-fn key_down(vk: i32) -> bool {
-    unsafe { GetAsyncKeyState(vk) == PRESSED }
+fn key_down(vk: u16) -> bool {
+    // GetAsyncKeyState 返回 i16，高位为 1（负数）即按下
+    unsafe { GetAsyncKeyState(vk as i32) < 0 }
 }
 
 #[derive(serde::Serialize)]
@@ -33,6 +34,7 @@ pub fn modifier_state() -> ModifierState {
 /// SW_SHOWNOACTIVATE 显示 + 无激活置顶：
 /// 面板出现时不从用户当前应用抢走键盘焦点。
 pub fn show_no_activate(hwnd: isize) {
+    let hwnd = hwnd as *mut c_void;
     unsafe {
         ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetWindowPos(

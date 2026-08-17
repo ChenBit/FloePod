@@ -126,16 +126,19 @@ onMounted(async () => {
   /* 原生拖放事件（文件路径） */
   if (ipc.inTauri) {
     const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-    await getCurrentWebview().onDragDrop((event) => {
-      const p = event.payload as { type: string; paths: string[] };
-      if (p.type === "enter" || p.type === "over") {
+    await getCurrentWebview().onDragDropEvent((event) => {
+      const p = event.payload;
+      if (p.type === "enter") {
         dropping.value = true;
-        dropCount.value = p.paths?.length ?? 0;
+        dropCount.value = p.paths.length;
+      } else if (p.type === "over") {
+        dropping.value = true;
       } else if (p.type === "leave") {
         dropping.value = false;
       } else if (p.type === "drop") {
+        dropping.value = false;
         dropCount.value = 0;
-        void handleDrop(p.paths ?? []);
+        void handleDrop(p.paths);
       }
     });
   }

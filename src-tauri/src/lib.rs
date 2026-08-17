@@ -18,7 +18,19 @@ use tauri::Manager;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 pub fn run() {
+    // 数据目录与数据库在窗口创建前准备好并注册，避免前端过早调用命令时 state 未就绪
+    let data_dir = paths::resolve();
+    let conn = match db::open(&data_dir) {
+        Ok(c) => c,
+        Err(e) => panic!("无法打开数据库: {e}"),
+    };
+    if let Err(e) = db::ensure_default_scene(&conn) {
+        panic!("初始化场景失败: {e}");
+    }
+    let app_state = state::AppState::new(conn, data_dir.clone());
+
     tauri::Builder::default()
+        .manage(app_state)
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // 二次启动：唤起已有实例
             manager::open_settings(&app);
@@ -26,22 +38,21 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_global_shortcut::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None::<Vec<String>>,
+            None::<Vec<&str>>,
         ))
         .plugin(tauri_plugin_drag::init())
         .setup(|app| {
-            let data_dir = paths::resolve(app.handle());
-            let conn = db::open(&data_dir)?;
-            db::ensure_default_scene(&conn)?;
-            app.manage(state::AppState::new(conn, data_dir.clone()));
-
             let settings = {
                 let state = app.state::<state::AppState>();
                 let conn = state.db.lock().unwrap();
-                settings::load(&conn, &data_dir.to_string_lossy(), VERSION)?
+                settings::load(
+                    &conn,
+                    &state.data_dir.to_string_lossy(),
+                    VERSION,
+                )?
             };
 
             tray::init(app.handle())?;

@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ipc } from "@/lib/ipc";
 import { Events, listen } from "@/lib/events";
-import type { ConflictStrategy, ExportMode, Scene, StagedItem } from "@/types";
+import type { ExportMode, Scene, StagedItem } from "@/types";
 
 /** 暂存数据：场景 + 条目 + 选中态（按当前场景过滤） */
 export const useStagingStore = defineStore("staging", {

@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, PhysicalSize};
-use tauri_plugin_clipboard_manager::ClipboardExt;
 
 use crate::db::{self, StagedItem};
 use crate::events;
@@ -229,8 +228,14 @@ pub fn stage_paths(
                     .unwrap_or_else(|| "未命名".into());
                 let target = unique_target(&dir, &name, &mut used);
                 if act == "move" {
-                    let moved = fs::rename(src, &target)
-                        .or_else(|_| copy_all(src, &target).and_then(|_| fs::remove_dir_all(src)));
+                    let moved = fs::rename(src, &target).or_else(|_| {
+                        copy_all(src, &target)?;
+                        if src.is_dir() {
+                            fs::remove_dir_all(src)
+                        } else {
+                            fs::remove_file(src)
+                        }
+                    });
                     moved.map_err(|e| format!("移动 {} 失败: {e}", name))?;
                 } else {
                     copy_all(src, &target).map_err(|e| format!("复制 {} 失败: {e}", name))?;
@@ -279,6 +284,7 @@ pub fn stage_text(app: AppHandle, content: String) -> Result<StagedItem, String>
     let base = sanitize_text_name(content.lines().next().unwrap_or("文字"));
     let mut used = HashSet::new();
     let target = unique_target(&dir, &format!("{base}.txt"), &mut used);
+    let size = content.len() as i64;
     fs::write(&target, content).map_err(|e| format!("写入失败: {e}"))?;
 
     let item = db::insert_item(
@@ -294,7 +300,7 @@ pub fn stage_text(app: AppHandle, content: String) -> Result<StagedItem, String>
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default(),
             ext: Some("txt".into()),
-            size: content.len() as i64,
+            size,
             created_at: db::now_ms(),
         },
     )?;
@@ -570,7 +576,7 @@ pub fn save_settings(app: AppHandle, patch: serde_json::Value) -> Result<Setting
     let (prev, next) = {
         let conn = state.db.lock().unwrap();
         let prev = load_settings_conn(&conn, &state)?;
-        let next = settings::merge_persist(&conn, patch, &data_dir_str(state), VERSION)?;
+        let next = settings::merge_persist(&conn, patch, &data_dir_str(&state), VERSION)?;
         (prev, next)
     };
     // 快捷键变更需可注册；失败则回滚热键字段并报错
@@ -644,7 +650,7 @@ pub fn open_settings(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn set_panel_size(app: AppHandle, width: u32, height: u32) {
+pub fn set_panel_size(app: AppHandle, _width: u32, height: u32) {
     let state = app.state::<AppState>();
     let settings = load_settings(&state).unwrap_or_default();
     if let Some(panel) = manager::panel_webview(&app) {

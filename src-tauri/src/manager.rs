@@ -116,7 +116,8 @@ pub fn apply_material(window: &WebviewWindow, material: &str) {
     } else {
         vec![]
     };
-    let _ = window.set_effects(EffectsBuilder::new().effects(effects));
+    let config = EffectsBuilder::new().effects(effects).build();
+    let _ = window.set_effects(Some(config));
 }
 
 /// 面板定位：贴着展开后的浮匣；y 跟随鼠标（悬停唤起时）或屏幕居中。
@@ -169,17 +170,18 @@ pub fn show_panel(app: &AppHandle, cursor_y: Option<f64>) {
     if state.panel_visible.load(Ordering::Relaxed) {
         return;
     }
+    // 先标记可见，place_panel 才能按「已展开」的条宽定位
+    state.panel_visible.store(true, Ordering::Relaxed);
     let s = current_settings(app);
     if let Some(panel) = panel_webview(app) {
         place_panel(app, &s, cursor_y);
         apply_material(&panel, &s.material);
         if let Ok(hwnd) = panel.hwnd() {
             win::show_no_activate(hwnd.0 as isize);
-            state.panel_visible.store(true, Ordering::Relaxed);
             emit_panel_mode(app);
-            apply_bar(app, &s);
         }
     }
+    apply_bar(app, &s);
 }
 
 /// 单击 / 托盘 / 热键：未开 -> 打开并固定；已固定 -> 收起；悬停展开中 -> 固定。
@@ -252,6 +254,10 @@ pub fn apply_settings(app: &AppHandle, s: &Settings) {
     apply_bar(app, s);
     if let Some(bar) = bar_webview(app) {
         apply_material(&bar, &s.material);
+        // 配置完成后让浮条亮相（首启由设置页选好暂存文件夹时触发）
+        if s.staging_folder.is_some() && s.first_run_done {
+            let _ = bar.show();
+        }
     }
     if let Some(panel) = panel_webview(app) {
         apply_material(&panel, &s.material);
