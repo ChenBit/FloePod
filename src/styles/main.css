@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+/*
+ * 浮匣设计令牌
+ * 原则：单一冰蓝强调色、中性冷灰表面、层级靠字号字重与留白、
+ * 克制的圆角与阴影、无渐变堆叠。深浅色跟随系统（.dark 切换）。
+ */
+
+:root {
+  /* 冰蓝强调色（唯一强调色） */
+  --accent: oklch(0.55 0.09 224);
+  --accent-hover: oklch(0.49 0.09 224);
+  --accent-soft: oklch(0.55 0.09 224 / 0.14);
+  --on-accent: oklch(0.99 0.005 224);
+
+  /* 中性冷灰 */
+  --ink: oklch(0.24 0.012 230);
+  --ink-2: oklch(0.45 0.012 230);
+  --ink-3: oklch(0.62 0.01 230);
+  --surface: oklch(0.985 0.003 230);
+  --surface-2: oklch(0.955 0.004 230);
+  --surface-3: oklch(0.925 0.005 230);
+  --line: oklch(0.89 0.006 230);
+  --line-strong: oklch(0.82 0.008 230);
+  --danger: oklch(0.55 0.19 25);
+
+  /* 窗口玻璃层（半透明窗口用） */
+  --glass: oklch(0.985 0.003 230 / 0.82);
+  --glass-strong: oklch(0.985 0.003 230 / 0.94);
+  --glass-line: oklch(1 0 0 / 0.55);
+  --glass-inner: oklch(1 0 0 / 0.5);
+
+  --shadow-panel: 0 18px 50px -12px oklch(0.2 0.02 230 / 0.35), 0 4px 14px -6px
+    oklch(0.2 0.02 230 / 0.18);
+  --shadow-pop: 0 10px 30px -10px oklch(0.2 0.02 230 / 0.3), 0 2px 8px -4px
+    oklch(0.2 0.02 230 / 0.15);
+}
+
+.dark {
+  --accent: oklch(0.78 0.09 224);
+  --accent-hover: oklch(0.83 0.09 224);
+  --accent-soft: oklch(0.78 0.09 224 / 0.18);
+  --on-accent: oklch(0.22 0.03 224);
+
+  --ink: oklch(0.93 0.006 230);
+  --ink-2: oklch(0.74 0.01 230);
+  --ink-3: oklch(0.56 0.012 230);
+  --surface: oklch(0.21 0.008 230);
+  --surface-2: oklch(0.25 0.009 230);
+  --surface-3: oklch(0.3 0.01 230);
+  --line: oklch(0.32 0.01 230);
+  --line-strong: oklch(0.4 0.012 230);
+  --danger: oklch(0.68 0.17 25);
+
+  --glass: oklch(0.22 0.01 230 / 0.82);
+  --glass-strong: oklch(0.24 0.01 230 / 0.93);
+  --glass-line: oklch(1 0 0 / 0.12);
+  --glass-inner: oklch(1 0 0 / 0.06);
+
+  --shadow-panel: 0 18px 50px -12px oklch(0 0 0 / 0.6), 0 4px 14px -6px oklch(0 0 0 / 0.4);
+  --shadow-pop: 0 10px 30px -10px oklch(0 0 0 / 0.55), 0 2px 8px -4px oklch(0 0 0 / 0.35);
+}
+
+@theme inline {
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-danger: var(--danger);
+
+  --color-glass: var(--glass);
+  --color-glass-strong: var(--glass-strong);
+  --color-glass-line: var(--glass-line);
+  --color-glass-inner: var(--glass-inner);
+
+  --shadow-panel: var(--shadow-panel);
+  --shadow-pop: var(--shadow-pop);
+
+  --font-sans:
+    "Segoe UI Variable Text", "Segoe UI", "Microsoft YaHei UI", "PingFang SC", "Noto Sans SC",
+    system-ui, sans-serif;
+
+  --radius-card: 10px;
+  --radius-panel: 14px;
+}
+
+/* 基础排版：系统字体，正文行高宽松，小字号微正字距 */
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  margin: 0;
+  color: var(--ink);
+  background: transparent;
+  font-size: 14px;
+  line-height: 1.55;
+  letter-spacing: 0.005em;
+  overscroll-behavior: none;
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
+/* 大字标题：负字距 */
+.text-display {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+/* 小字号辅助文字：微正字距 */
+.text-caption {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  letter-spacing: 0.012em;
+}
+
+/* 细滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 动效偏好降级：弹簧/位移 -> 淡入淡出 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.12s !important;
+  }
+}

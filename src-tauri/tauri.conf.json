@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "FloePod",
+  "version": "0.1.0",
+  "identifier": "com.mogrowang.floepod",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "label": "bar",
+        "url": "index.html",
+        "title": "浮匣",
+        "width": 12,
+        "height": 800,
+        "x": 0,
+        "y": 0,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": false,
+        "focus": false,
+        "focusable": false,
+        "visible": false,
+        "dragDropEnabled": true
+      },
+      {
+        "label": "panel",
+        "url": "index.html",
+        "title": "浮匣 暂存面板",
+        "width": 380,
+        "height": 420,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "resizable": false,
+        "shadow": true,
+        "focus": false,
+        "visible": false,
+        "dragDropEnabled": false
+      },
+      {
+        "label": "settings",
+        "url": "index.html",
+        "title": "浮匣 设置",
+        "width": 780,
+        "height": 560,
+        "minWidth": 700,
+        "minHeight": 500,
+        "visible": false,
+        "resizable": true,
+        "center": true,
+        "skipTaskbar": false
+      }
+    ],
+    "security": {
+      "capabilities": ["default"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      }
+    }
+  }
+}

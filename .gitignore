@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Tauri / Rust
+src-tauri/target
+src-tauri/gen
+
+# 便携版数据目录（运行时生成）
+FloePodData
+*.log
+
+.DS_Store
+Thumbs.db
