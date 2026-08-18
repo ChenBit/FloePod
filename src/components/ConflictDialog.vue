@@ -65,7 +65,7 @@ const verb = computed(() => (props.mode === "move" ? "移动" : "复制"));
 }
 .act {
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--ink);
   border-radius: 10px;
   padding: 9px 10px;

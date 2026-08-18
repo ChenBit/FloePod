@@ -12,6 +12,7 @@
   --accent-hover: #007fd9;
   --accent-soft: rgb(0 152 255 / 0.14);
   --on-accent: #ffffff;
+  --on-danger: #ffffff;
 
   /* 中性冷灰 */
   --ink: oklch(0.24 0.012 230);
@@ -108,7 +109,8 @@
     system-ui, sans-serif;
 
   --radius-card: 10px;
-  --radius-panel: 14px;
+  /* Windows 11 顶层窗口的标准逻辑圆角，与 DWM 原生窗口对齐 */
+  --radius-panel: 8px;
 }
 
 /* 基础排版：系统字体，正文行高宽松，小字号微正字距 */
@@ -116,6 +118,7 @@ html {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  background: transparent;
 }
 
 body {
@@ -130,8 +133,25 @@ body {
 }
 
 input,
-textarea {
+textarea,
+select {
   user-select: text;
+  color-scheme: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 /* 大字标题：负字距 */

@@ -7,7 +7,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ipc } from "@/lib/ipc";
-import { Events, listen } from "@/lib/events";
+import { Events, listenCurrent } from "@/lib/events";
 import { springValue, type SpringHandle } from "@/lib/spring";
 import { useSettingsStore } from "@/stores/settings";
 import { useStagingStore } from "@/stores/staging";
@@ -23,6 +23,7 @@ const accepting = ref(false);
 let hoverTimeout: number | undefined;
 let shortSpring: SpringHandle | null = null;
 const short = ref(44);
+const unlisteners: Array<() => void> = [];
 
 const count = computed(
   () => staging.items.filter((i) => i.podId === props.podId).length,
@@ -105,13 +106,13 @@ onMounted(async () => {
   await settingsStore.load();
   staging.setActivePod(props.podId);
   await staging.refresh(props.podId);
-  settingsStore.listenChanges();
-  staging.listenChanges(props.podId);
+  void settingsStore.listenChanges();
+  unlisteners.push(await staging.listenChanges(props.podId));
 
   /* 原生拖放事件（文件路径） */
   if (ipc.inTauri) {
     const { getCurrentWebview } = await import("@tauri-apps/api/webview");
-    await getCurrentWebview().onDragDropEvent((event) => {
+    unlisteners.push(await getCurrentWebview().onDragDropEvent((event) => {
       const p = event.payload;
       if (p.type === "enter") {
         accepting.value = true;
@@ -126,12 +127,12 @@ onMounted(async () => {
         void ipc.setPodAccept(props.podId, false);
         void handleDrop(p.paths);
       }
-    });
+    }));
   }
 
   /* 剪贴板收集热键：只由本匣处理（事件携带 podId） */
-  listen<{ podId?: number }>(Events.CollectClipboard, async (p) => {
-    if (p.podId && p.podId !== props.podId) return;
+  unlisteners.push(await listenCurrent<{ podId?: number }>(Events.CollectClipboard, async (p) => {
+    if (!p || (p.podId && p.podId !== props.podId)) return;
     if (!pod.value) return;
     try {
       const { readText } = await import("@tauri-apps/plugin-clipboard-manager");
@@ -140,7 +141,7 @@ onMounted(async () => {
     } catch (err) {
       console.error("collect clipboard failed", err);
     }
-  });
+  }));
 
   /* 胶囊短边弹簧 */
   shortSpring = springValue(44, 44, (v) => (short.value = v), {
@@ -152,6 +153,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.clearTimeout(hoverTimeout);
   shortSpring?.stop();
+  unlisteners.splice(0).forEach((unlisten) => unlisten());
 });
 </script>
 

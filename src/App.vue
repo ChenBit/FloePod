@@ -6,34 +6,30 @@
  * - pod_{id}_panel    -> 匣的弹出面板
  * 浏览器开发时用 location.hash（#/settings /#/pod_1 /#/pod_1_panel）。
  */
-import { computed, onMounted, ref } from "vue";
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import PodBar from "@/windows/PodBar.vue";
 import PodPanel from "@/windows/PodPanel.vue";
 import SettingsWindow from "@/windows/SettingsWindow.vue";
 
-const label = ref<string>("pod_1");
-const podId = ref<number>(1);
-const isPanel = ref(false);
-
-onMounted(async () => {
+/**
+ * 窗口标签必须在首帧渲染前确定。旧实现先渲染 pod_1，再在 onMounted
+ * 中切换真实窗口，导致所有动态窗口短暂挂载错误组件并遗留事件监听。
+ */
+function resolveWindowLabel(): string {
   if ("__TAURI_INTERNALS__" in window) {
-    const { getCurrentWebviewWindow } = await import("@tauri-apps/api/webviewWindow");
-    label.value = getCurrentWebviewWindow().label;
-  } else {
-    label.value = location.hash.replace(/^#\/?/, "") || "pod_1";
+    return getCurrentWebviewWindow().label;
   }
-  const m = label.value.match(/^pod_(\d+)(?:_panel)?$/);
-  if (m) {
-    podId.value = Number(m[1]);
-    isPanel.value = !!m[2];
-  }
-});
+  return location.hash.replace(/^#\/?/, "") || "pod_1";
+}
 
-const view = computed(() => {
-  if (label.value === "settings") return SettingsWindow;
-  if (label.value.match(/^pod_\d+_panel$/)) return PodPanel;
-  return PodBar;
-});
+const label = resolveWindowLabel();
+const match = label.match(/^pod_(\d+)(?:_panel)?$/);
+const podId = match ? Number(match[1]) : 1;
+const view = label === "settings"
+  ? SettingsWindow
+  : /^pod_\d+_panel$/.test(label)
+    ? PodPanel
+    : PodBar;
 </script>
 
 <template>

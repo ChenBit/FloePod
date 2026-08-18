@@ -43,7 +43,7 @@ let mockSettings: import("@/types").Settings = {
       enabled: true,
     },
   ],
-  version: "0.5.0-mock",
+  version: "0.5.1-mock",
   dataDir: "浏览器预览",
 };
 const mockMonitors: MonitorInfo[] = [
@@ -86,7 +86,7 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
   const ret = (v: unknown) => v as T;
   switch (cmd) {
     case "get_bootstrap":
-      return ret({ settings: mockSettings, monitors: mockMonitors, version: "0.5.0-mock" });
+      return ret({ settings: mockSettings, monitors: mockMonitors, version: "0.5.1-mock" });
     case "get_pod":
       return ret(mockSettings.pods.find((p) => p.id === Number(args?.podId)) ?? null);
     case "get_monitors":
@@ -133,10 +133,12 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
       return ret(mockSettings);
     case "stage_text": {
       const content = String(args?.content ?? "");
+      const requestedTitle = String(args?.title ?? "").trim().replace(/\.txt$/i, "");
+      const baseName = requestedTitle || `文字 ${mockItems.length + 1}`;
       const item: import("@/types").StagedItem = {
         id: Date.now(), podId: Number(args?.podId) || 1, kind: "text",
-        stagingPath: `D:\\staging\\文字 ${mockItems.length + 1}.txt`,
-        originalPath: null, name: `文字 ${mockItems.length + 1}.txt`, ext: "txt",
+        stagingPath: `D:\\staging\\${baseName}.txt`,
+        originalPath: null, name: `${baseName}.txt`, ext: "txt",
         size: content.length, createdAt: Date.now(),
       };
       seed().push(item);
@@ -171,8 +173,8 @@ export const ipc = {
   /** 确认动作后执行暂存 */
   stagePaths: (podId: number, paths: string[], action: DropAction): Promise<StagedItem[]> =>
     invoke("stage_paths", { podId, paths, action }),
-  stageText: (podId: number, content: string): Promise<StagedItem> =>
-    invoke("stage_text", { podId, content }),
+  stageText: (podId: number, content: string, title?: string): Promise<StagedItem> =>
+    invoke("stage_text", { podId, content, title: title ?? null }),
 
   // ---- 列表 ----
   listPodItems: (podId: number): Promise<StagedItem[]> =>

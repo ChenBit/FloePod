@@ -63,7 +63,7 @@ function onKeydown(e: KeyboardEvent) {
 <style scoped>
 .hk {
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--ink);
   border-radius: 8px;
   padding: 6px 12px;

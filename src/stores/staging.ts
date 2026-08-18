@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { ipc } from "@/lib/ipc";
-import { Events, listen } from "@/lib/events";
+import { Events, listenCurrent } from "@/lib/events";
 import type { ExportMode, StagedItem } from "@/types";
 
 /** 暂存数据：条目 + 选中态（按当前匣过滤） */
@@ -69,7 +69,7 @@ export const useStagingStore = defineStore("staging", {
     },
 
     async listenChanges(podId: number) {
-      listen<{ podId: number }>(Events.ItemsChanged, (p) => {
+      return listenCurrent<{ podId: number }>(Events.ItemsChanged, (p) => {
         if (!p.podId || p.podId === podId) void this.refresh(podId);
       });
     },

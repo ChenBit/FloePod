@@ -82,7 +82,7 @@ const extra = computed(() => names.value.length - shown.value.length);
 }
 .act {
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--ink);
   border-radius: 10px;
   padding: 9px 12px;

@@ -5,7 +5,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ipc } from "@/lib/ipc";
-import { Events, listen } from "@/lib/events";
+import { Events, listenCurrent } from "@/lib/events";
 import { useSettingsStore } from "@/stores/settings";
 import { useStagingStore } from "@/stores/staging";
 import type { ConflictStrategy, DropAction, ExportMode, PanelMode, StagedItem } from "@/types";
@@ -26,6 +26,7 @@ const mode = ref<PanelMode>("list");
 const pendingPaths = ref<string[]>([]);
 const dragMode = ref<"copy" | "move">("copy");
 const textOpen = ref(false);
+const textTitle = ref("");
 const textValue = ref("");
 const toast = ref("");
 let toastTimer: number | undefined;
@@ -35,6 +36,7 @@ let anchorId: number | null = null;
 const pinned = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
 let lastSlideIn = 0;
+const unlisteners: Array<() => void> = [];
 
 function slideDir(): string {
   return edge.value;
@@ -117,21 +119,22 @@ function makeDragIcon(paths: string[], ext: string | null): string {
   const ctx = c.getContext("2d");
   if (!ctx) return "";
   ctx.scale(dpr, dpr);
-  const dark = document.documentElement.classList.contains("dark");
-  ctx.fillStyle = dark ? "#2a2e33" : "#f6f7f8";
+  const css = getComputedStyle(document.documentElement);
+  const color = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  ctx.fillStyle = color("--surface-raised", "#f6f7f8");
   const r = 10;
   roundRect(ctx, 10, 8, w, 48, r);
   ctx.fill();
-  ctx.strokeStyle = dark ? "#3d434a" : "#d6dade";
+  ctx.strokeStyle = color("--line-strong", "#d6dade");
   ctx.lineWidth = 1.5;
   roundRect(ctx, 10, 8, w, 48, r);
   ctx.stroke();
-  ctx.fillStyle = dark ? "#dfe3e6" : "#3d434a";
+  ctx.fillStyle = color("--ink", "#3d434a");
   ctx.font = "600 13px 'Segoe UI', sans-serif";
   ctx.textAlign = "center";
   ctx.fillText((ext ?? "文件").slice(0, 5).toUpperCase(), 32, 36);
   if (paths.length > 1) {
-    ctx.fillStyle = "#2d7ca3";
+    ctx.fillStyle = color("--accent", "#2d7ca3");
     ctx.beginPath();
     ctx.arc(46, 44, 11, 0, Math.PI * 2);
     ctx.fill();
@@ -267,7 +270,8 @@ async function stashText() {
   const content = textValue.value.trim();
   if (!content) return;
   try {
-    await ipc.stageText(props.podId, content);
+    await ipc.stageText(props.podId, content, textTitle.value.trim() || undefined);
+    textTitle.value = "";
     textValue.value = "";
     textOpen.value = false;
     showToast("文字已暂存");
@@ -336,42 +340,45 @@ watch(
 );
 
 onMounted(async () => {
-  await settingsStore.load();
-  staging.setActivePod(props.podId);
-  await staging.refresh(props.podId);
-  settingsStore.listenChanges();
-  staging.listenChanges(props.podId);
-
   mode.value = "list";
   pendingPaths.value = [];
   pinned.value = false;
+  staging.setActivePod(props.podId);
 
-  listen<{ mode: PanelMode; paths?: string[] }>(Events.PanelMode, (p) => {
-    mode.value = p.mode;
-    pendingPaths.value = p.paths ?? [];
-  });
-  listen<never>(Events.SettingsChanged, () => {});
+  // 先注册定向事件，再读取设置/列表，避免首次显示时丢失模式或固定状态。
+  unlisteners.push(
+    ...(await Promise.all([
+      staging.listenChanges(props.podId),
+      listenCurrent<{ mode: PanelMode; paths?: string[] }>(Events.PanelMode, (p) => {
+        mode.value = p.mode;
+        pendingPaths.value = p.paths ?? [];
+      }),
+      /* 面板每次出现都重播滑入动画 */
+      listenCurrent<never>(Events.PanelShown, () => playSlideIn()),
+      /* 固定状态同步 */
+      listenCurrent<{ pinned: boolean }>(Events.PanelPinned, (p) => {
+        pinned.value = p.pinned;
+      }),
+      /* 窗口已被隐藏：DOM 置为「待显示」透明态，下次显示第一帧不闪现完整内容 */
+      listenCurrent<never>(Events.PanelHidden, () => {
+        const el = rootEl.value;
+        if (!el) return;
+        el.classList.remove(
+          "slide-out",
+          "slide-out-left",
+          "slide-out-right",
+          "slide-out-top",
+          "slide-out-bottom",
+        );
+        el.classList.remove("slide-in", ...slideDirs());
+        el.classList.add("pre-show");
+      }),
+    ])),
+  );
 
-  /* 面板每次出现都重播滑入动画 */
-  listen<never>(Events.PanelShown, () => playSlideIn());
-  /* 固定状态同步 */
-  listen<{ pinned: boolean }>(Events.PanelPinned, (p) => {
-    pinned.value = p.pinned;
-  });
-  /* 窗口已被隐藏：DOM 置为「待显示」透明态，下次显示第一帧不闪现完整内容 */
-  listen<never>(Events.PanelHidden, () => {
-    const el = rootEl.value;
-    if (!el) return;
-    el.classList.remove(
-      "slide-out",
-      "slide-out-left",
-      "slide-out-right",
-      "slide-out-top",
-      "slide-out-bottom",
-    );
-    el.classList.remove("slide-in", ...slideDirs());
-    el.classList.add("pre-show");
-  });
+  await settingsStore.load();
+  await staging.refresh(props.podId);
+  void settingsStore.listenChanges();
 
   window.addEventListener("keydown", onKeydown);
 
@@ -387,6 +394,7 @@ onBeforeUnmount(() => {
   ro?.disconnect();
   window.clearTimeout(toastTimer);
   window.clearTimeout(sizeTimer);
+  unlisteners.splice(0).forEach((unlisten) => unlisten());
 });
 
 function onPointerEnter() {
@@ -401,7 +409,10 @@ function onPointerLeave() {
   <div ref="rootEl" class="panel-root" @pointerenter="onPointerEnter" @pointerleave="onPointerLeave">
     <!-- 头部 -->
     <header class="panel-head">
-      <div class="pod-name" :title="pod?.name">{{ pod?.name ?? "匣" }}</div>
+      <div class="pod-title">
+        <div class="pod-name" :title="pod?.name">{{ pod?.name ?? "匣" }}</div>
+        <span v-if="items.length" class="item-count">{{ items.length }}</span>
+      </div>
       <div class="head-right">
         <button
           v-if="!textOpen"
@@ -452,12 +463,24 @@ function onPointerLeave() {
       />
 
       <div v-else-if="textOpen" class="text-stash">
-        <textarea
-          v-model="textValue"
-          placeholder="粘贴或输入要暂存的文字…"
-          rows="5"
-          autofocus
-        />
+        <label class="text-field">
+          <span>文件标题</span>
+          <input
+            v-model="textTitle"
+            maxlength="48"
+            placeholder="可选，默认使用正文第一行"
+            autofocus
+            @keydown.enter.prevent
+          />
+        </label>
+        <label class="text-field">
+          <span>正文</span>
+          <textarea
+            v-model="textValue"
+            placeholder="粘贴或输入要暂存的文字…"
+            rows="5"
+          />
+        </label>
         <div class="text-actions">
           <button type="button" class="act primary" @pointerdown="stashText">暂存</button>
           <button type="button" class="act ghost" @pointerdown="textOpen = false">取消</button>
@@ -467,7 +490,7 @@ function onPointerLeave() {
       <template v-else>
         <div v-if="items.length === 0" class="empty">
           <div class="empty-title">「{{ pod?.name ?? "匣" }}」是空的</div>
-          <div class="empty-hint">把文件或图片拖到屏幕边缘的这个匣上<br />松手后会复制一份到这里</div>
+          <div class="empty-hint">把文件或图片拖到屏幕边缘的这个匣上<br />将按当前匣的动作设置暂存</div>
         </div>
         <TransitionGroup v-else name="list" tag="div" class="items">
           <ItemRow
@@ -530,9 +553,13 @@ function onPointerLeave() {
   display: flex;
   flex-direction: column;
   background: var(--glass);
-  /* 圆角由 Windows 系统窗口自带（DWM），CSS 再切一次会双重圆角导致边缘不平 */
-  box-shadow: inset 0 0 0 1px var(--glass-line);
-  overflow: hidden;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--glass-line);
+  box-shadow: var(--shadow-panel), inset 0 1px 0 var(--glass-inner);
+  backdrop-filter: blur(24px) saturate(1.16);
+  clip-path: inset(0 round var(--radius-panel));
+  overflow: clip;
+  box-sizing: border-box;
 }
 /* 隐藏后保持的「待显示」透明态：窗口显示第一帧不闪现完整内容 */
 .panel-root.pre-show {
@@ -585,6 +612,13 @@ function onPointerLeave() {
   justify-content: space-between;
   padding: 10px 12px 6px;
   flex-shrink: 0;
+  background: color-mix(in oklab, var(--glass-strong) 72%, transparent);
+}
+.pod-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
 }
 .pod-name {
   font-size: 13px;
@@ -594,6 +628,21 @@ function onPointerLeave() {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 180px;
+}
+.item-count {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
 }
 .head-right {
   display: flex;
@@ -695,7 +744,7 @@ function onPointerLeave() {
 }
 .foot-btn {
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--ink);
   border-radius: 8px;
   padding: 5px 10px;
@@ -731,22 +780,36 @@ function onPointerLeave() {
   flex-direction: column;
   gap: 10px;
 }
-.text-stash textarea {
+.text-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.text-field input,
+.text-field textarea {
   width: 100%;
-  resize: none;
   border: 1px solid var(--line-strong);
   border-radius: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-size: 13px;
   font-family: inherit;
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--ink);
   outline: none;
   line-height: 1.6;
   box-sizing: border-box;
 }
-.text-stash textarea:focus {
+.text-field textarea {
+  resize: none;
+  padding: 10px 12px;
+}
+.text-field input:focus,
+.text-field textarea:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .text-actions {
   display: flex;
@@ -754,7 +817,7 @@ function onPointerLeave() {
 }
 .act {
   border: 1px solid var(--line-strong);
-  background: var(--surface);
+  background: var(--surface-raised);
   color: var(--ink);
   border-radius: 9px;
   padding: 7px 14px;

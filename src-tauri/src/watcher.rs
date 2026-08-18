@@ -135,11 +135,15 @@ fn reconcile_all(app: &AppHandle) -> Result<(), String> {
     if changed {
         for pod in settings.pods.iter().filter(|p| p.enabled) {
             let payload = serde_json::json!({ "podId": pod.id });
-            if let Some(panel) = manager::pod_panel(app, pod.id) {
-                let _ = panel.emit(events::ITEMS_CHANGED, payload.clone());
+            if manager::pod_panel(app, pod.id).is_some() {
+                let _ = app.emit_to(
+                    format!("pod_{}_panel", pod.id),
+                    events::ITEMS_CHANGED,
+                    payload.clone(),
+                );
             }
-            if let Some(bar) = manager::pod_bar(app, pod.id) {
-                let _ = bar.emit(events::ITEMS_CHANGED, payload);
+            if manager::pod_bar(app, pod.id).is_some() {
+                let _ = app.emit_to(format!("pod_{}", pod.id), events::ITEMS_CHANGED, payload);
             }
         }
     }

@@ -80,7 +80,7 @@ watch([index, () => props.options], async () => {
   top: 2px;
   left: 0;
   height: calc(100% - 4px);
-  background: var(--surface);
+  background: var(--surface-raised);
   border-radius: 7px;
   box-shadow: 0 1px 4px oklch(0.2 0.02 230 / 0.18);
   transition: transform 260ms var(--ease-out), width 260ms var(--ease-out);

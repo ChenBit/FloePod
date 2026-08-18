@@ -203,6 +203,12 @@ fn ensure_pod_windows(app: &AppHandle, pod: &Pod) {
             win::disable_rounding(hwnd.0 as isize);
         }
     }
+    // 面板：请求系统圆角，与 CSS 的 clip-path 圆角轮廓对齐
+    if let Some(panel) = pod_panel(app, pod.id) {
+        if let Ok(hwnd) = panel.hwnd() {
+            win::prefer_rounded_corners(hwnd.0 as isize);
+        }
+    }
     place_pod_bar(app, pod, false);
 }
 
@@ -295,16 +301,24 @@ pub fn emit_panel_mode(app: &AppHandle, id: u64) {
             r.map(|r| r.pending_drop.clone()).unwrap_or_default(),
         )
     };
-    if let Some(panel) = pod_panel(app, id) {
-        let _ = panel.emit(events::PANEL_MODE, serde_json::json!({ "mode": mode, "paths": paths }));
+    if pod_panel(app, id).is_some() {
+        let _ = app.emit_to(
+            format!("pod_{id}_panel"),
+            events::PANEL_MODE,
+            serde_json::json!({ "mode": mode, "paths": paths }),
+        );
     }
 }
 
 pub fn emit_panel_pinned(app: &AppHandle, id: u64) {
     let state = app.state::<AppState>();
     let pinned = pods_guard(&state).get(&id).map(|r| r.panel_pinned).unwrap_or(false);
-    if let Some(panel) = pod_panel(app, id) {
-        let _ = panel.emit(events::PANEL_PINNED, serde_json::json!({ "pinned": pinned }));
+    if pod_panel(app, id).is_some() {
+        let _ = app.emit_to(
+            format!("pod_{id}_panel"),
+            events::PANEL_PINNED,
+            serde_json::json!({ "pinned": pinned }),
+        );
     }
 }
 
@@ -348,10 +362,11 @@ pub fn show_panel(app: &AppHandle, id: u64) {
         place_panel(app, &pod);
         apply_material_once(app, &pod.material, id);
         if let Ok(hwnd) = panel.hwnd() {
+            win::prefer_rounded_corners(hwnd.0 as isize);
             win::show_no_activate(hwnd.0 as isize);
             emit_panel_mode(app, id);
         }
-        let _ = panel.emit(events::PANEL_SHOWN, ());
+        let _ = app.emit_to(format!("pod_{id}_panel"), events::PANEL_SHOWN, ());
     }
     emit_panel_pinned(app, id);
 }

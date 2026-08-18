@@ -1152,7 +1152,7 @@ dependencies = [
 
 [[package]]
 name = "floe-pod"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "image",
  "notify",

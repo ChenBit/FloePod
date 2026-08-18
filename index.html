@@ -4,6 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>浮匣 FloePod</title>
+    <style>
+      html,
+      body,
+      #app {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        background: transparent;
+      }
+      html:not(.theme-ready) #app {
+        opacity: 0;
+      }
+      html.theme-ready #app {
+        opacity: 1;
+        transition: opacity 120ms ease;
+      }
+      @media (prefers-reduced-motion: reduce) {
+        html.theme-ready #app {
+          transition: none;
+        }
+      }
+    </style>
+    <script>
+      // 在 Vue/CSS 加载前给 WebView 一个正确的系统主题，避免白色首帧闪烁。
+      const initialDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.classList.add(initialDark ? "dark" : "light");
+      document.documentElement.style.colorScheme = initialDark ? "dark" : "light";
+      // 后端初始化异常时也不让界面永久透明。
+      window.setTimeout(() => document.documentElement.classList.add("theme-ready"), 1500);
+    </script>
   </head>
   <body>
     <div id="app"></div>
