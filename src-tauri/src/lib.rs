@@ -64,6 +64,10 @@ pub fn run() {
 
             // 落地：创建匣窗口 / 应用外观 / 自启 / 监听 / 托盘
             manager::apply_settings(app.handle(), &settings);
+            // 启动对账：把暂存文件夹中已有但未入库的文件读入列表
+            app.state::<state::AppState>()
+                .watcher_dirty
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             if let Err(e) = hotkeys::register(app.handle(), &settings) {
                 eprintln!("[hotkeys] {e}");
             }

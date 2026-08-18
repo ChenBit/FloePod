@@ -20,6 +20,9 @@
   --surface: #eef3f8;
   --surface-2: #bfc1c4;
   --surface-3: #ccd0d5;
+  /* 抬升表面（卡片/输入框/按钮）：比页面背景略亮一层 */
+  --surface-raised: #ffffff;
+  --surface-hover: #f2f4f7;
   --line: oklch(0.89 0.006 230);
   --line-strong: oklch(0.82 0.008 230);
   --danger: oklch(0.55 0.19 25);
@@ -29,6 +32,14 @@
   --glass-strong: rgb(238 243 248 / 0.85);
   --glass-line: oklch(1 0 0 / 0.55);
   --glass-inner: oklch(1 0 0 / 0.5);
+
+  /* 胶囊条（贴在屏幕边缘的短条）玻璃 */
+  --bar-glass: rgb(238 243 248 / 0.55);
+  --bar-glass-hover: rgb(238 243 248 / 0.7);
+
+  /* 统一缓动：进入/位移动画用出程缓动（苹果式平滑收尾） */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
   --shadow-panel: 0 18px 50px -12px oklch(0.2 0.02 230 / 0.35), 0 4px 14px -6px
     oklch(0.2 0.02 230 / 0.18);
@@ -48,6 +59,8 @@
   --surface: oklch(0.21 0.008 230);
   --surface-2: oklch(0.25 0.009 230);
   --surface-3: oklch(0.3 0.01 230);
+  --surface-raised: oklch(0.24 0.009 230);
+  --surface-hover: oklch(0.28 0.01 230);
   --line: oklch(0.32 0.01 230);
   --line-strong: oklch(0.4 0.012 230);
   --danger: oklch(0.68 0.17 25);
@@ -56,6 +69,9 @@
   --glass-strong: oklch(0.24 0.01 230 / 0.8);
   --glass-line: oklch(1 0 0 / 0.12);
   --glass-inner: oklch(1 0 0 / 0.06);
+
+  --bar-glass: rgb(255 255 255 / 0.08);
+  --bar-glass-hover: rgb(255 255 255 / 0.13);
 
   --shadow-panel: 0 18px 50px -12px oklch(0 0 0 / 0.6), 0 4px 14px -6px oklch(0 0 0 / 0.4);
   --shadow-pop: 0 10px 30px -10px oklch(0 0 0 / 0.55), 0 2px 8px -4px oklch(0 0 0 / 0.35);
@@ -73,6 +89,8 @@
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-surface-3: var(--surface-3);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-danger: var(--danger);

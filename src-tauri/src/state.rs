@@ -39,14 +39,14 @@ pub struct PodRuntime {
     pub panel_inside: bool,
     pub panel_visible: bool,
     pub panel_pinned: bool,
-    /// 看门狗已发出「动画收起」请求，等待前端播完动画后真正隐藏
-    pub panel_hiding: bool,
     /// 面板正在向外拖出文件（OLE 拖拽进行中）
     pub dragging_out: bool,
     pub mode: PanelMode,
     pub pending_drop: Vec<String>,
     pub panel_height: u32,
     pub last_change: Option<Instant>,
+    /// 已应用的窗口材质（避免每次显示都重设亚克力引起闪烁）
+    pub material: Option<String>,
 }
 
 pub struct AppState {

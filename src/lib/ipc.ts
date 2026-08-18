@@ -43,7 +43,7 @@ let mockSettings: import("@/types").Settings = {
       enabled: true,
     },
   ],
-  version: "0.4.0-mock",
+  version: "0.5.0-mock",
   dataDir: "浏览器预览",
 };
 const mockMonitors: MonitorInfo[] = [
@@ -86,7 +86,7 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
   const ret = (v: unknown) => v as T;
   switch (cmd) {
     case "get_bootstrap":
-      return ret({ settings: mockSettings, monitors: mockMonitors, version: "0.4.0-mock" });
+      return ret({ settings: mockSettings, monitors: mockMonitors, version: "0.5.0-mock" });
     case "get_pod":
       return ret(mockSettings.pods.find((p) => p.id === Number(args?.podId)) ?? null);
     case "get_monitors":

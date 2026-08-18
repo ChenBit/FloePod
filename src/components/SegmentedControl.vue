@@ -83,8 +83,7 @@ watch([index, () => props.options], async () => {
   background: var(--surface);
   border-radius: 7px;
   box-shadow: 0 1px 4px oklch(0.2 0.02 230 / 0.18);
-  transition: transform 260ms cubic-bezier(0.25, 1, 0.4, 1), width 260ms
-    cubic-bezier(0.25, 1, 0.4, 1);
+  transition: transform 260ms var(--ease-out), width 260ms var(--ease-out);
 }
 .seg-item {
   position: relative;

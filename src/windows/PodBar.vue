@@ -34,8 +34,9 @@ const capsuleStyle = computed(() =>
     : { height: short.value + "px", width: "100%", opacity: pod.value?.opacity ?? 0.85 },
 );
 
-/* 仅在拖入接纳时短条变宽（圆角矩形）；悬停弹出面板不改变形状 */
-watch(accepting, (v) => shortSpring?.setTarget(v ? 60 : 44));
+/* 仅在拖入接纳时短条变宽（圆角矩形）；悬停弹出面板不改变形状。
+   目标 62 与 Rust 侧 POD_BAR_ACCEPT 一致：胶囊填满窗口，圆角矩形完整显示。 */
+watch(accepting, (v) => shortSpring?.setTarget(v ? 62 : 44));
 
 function onPointerEnter() {
   hovering.value = true;
@@ -191,12 +192,12 @@ onBeforeUnmount(() => {
   min-width: 44px;
   min-height: 44px;
   will-change: width, height;
-  background: rgb(238 243 248 / 0.55);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.6);
+  background: var(--bar-glass);
+  box-shadow: inset 0 0 0 1px var(--glass-line);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: box-shadow 200ms ease, background 200ms ease;
+  transition: box-shadow 200ms var(--ease-out), background 200ms var(--ease-out);
 }
 .edge-left .capsule {
   left: 0;
@@ -224,11 +225,11 @@ onBeforeUnmount(() => {
 }
 
 .capsule.hovering {
-  background: rgb(238 243 248 / 0.7);
+  background: var(--bar-glass-hover);
 }
 .capsule.accepting {
-  background: var(--accent-soft);
-  box-shadow: inset 0 0 0 1.5px var(--accent);
+  background: var(--accent);
+  box-shadow: inset 0 0 0 1.5px oklch(1 0 0 / 0.25);
   animation: breathe 1.1s ease-in-out infinite;
 }
 @keyframes breathe {
@@ -268,7 +269,7 @@ onBeforeUnmount(() => {
   letter-spacing: 0.3em;
   font-size: 12px;
   font-weight: 650;
-  color: var(--accent);
+  color: var(--on-accent);
   white-space: nowrap;
 }
 

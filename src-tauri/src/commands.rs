@@ -182,6 +182,10 @@ pub async fn create_pod(app: AppHandle, config: serde_json::Value) -> Result<Pod
     };
     drop(state);
     manager::apply_settings(&app, &manager::current_settings(&app));
+    // 定位了新文件夹：触发对账，把文件夹中已有的文件读入列表
+    app.state::<AppState>()
+        .watcher_dirty
+        .store(true, std::sync::atomic::Ordering::Relaxed);
     let _ = app.emit(events::PODS_CHANGED, ());
     Ok(pod)
 }
@@ -225,9 +229,10 @@ fn pod_from_config(v: &serde_json::Value) -> Result<Pod, String> {
 #[tauri::command]
 pub async fn update_pod(app: AppHandle, pod_id: u64, patch: serde_json::Value) -> Result<Pod, String> {
     let state = app.state::<AppState>();
-    let pod = {
+    let (pod, folder_changed) = {
         let conn = state.db.lock().unwrap();
         let mut pod = pod_of_conn(&conn, &state, pod_id)?;
+        let old_folder = pod.staging_folder.clone();
         if let Some(obj) = patch.as_object() {
             for (k, v) in obj {
                 // 按字段合并（string/number/bool 均可，数值宽容解析）
@@ -295,10 +300,17 @@ pub async fn update_pod(app: AppHandle, pod_id: u64, patch: serde_json::Value) -
             }
         }
         settings::upsert_pod(&conn, &pod, &data_dir_str(&state), VERSION)?;
-        pod
+        let folder_changed = old_folder != pod.staging_folder;
+        (pod, folder_changed)
     };
     drop(state);
     manager::apply_settings(&app, &manager::current_settings(&app));
+    // 重新定位了暂存文件夹：触发对账，读取新文件夹中已有的文件
+    if folder_changed {
+        app.state::<AppState>()
+            .watcher_dirty
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     let _ = app.emit(events::PODS_CHANGED, ());
     Ok(pod)
 }
@@ -785,14 +797,22 @@ pub fn set_panel_size(app: AppHandle, pod_id: u64, _width: u32, height: u32) {
             let scale = panel.scale_factor().unwrap_or(1.0);
             let w = (pod.panel_width as f64 * scale).round() as u32;
             let h = ((height as f64 * scale).round() as u32).clamp(160, 900);
-            {
+            let resize_now = {
                 let mut guard = state.pods.lock().unwrap();
                 if let Some(r) = guard.get_mut(&pod_id) {
+                    let changed = r.panel_height != h;
                     r.panel_height = h;
+                    // 面板可见且高度变化才调整窗口；隐藏期间只记录高度，
+                    // 下次显示时按新尺寸摆放，避免「显示后跳一下」的闪烁。
+                    changed && r.panel_visible
+                } else {
+                    false
                 }
+            };
+            if resize_now {
+                let _ = panel.set_size(PhysicalSize::new(w, h));
+                manager::place_panel_dyn(&app, pod_id);
             }
-            let _ = panel.set_size(PhysicalSize::new(w, h));
-            manager::place_panel_dyn(&app, pod_id);
         }
     }
 }

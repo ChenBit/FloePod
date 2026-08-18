@@ -49,7 +49,7 @@ function toggle() {
   border-radius: 999px;
   background: #fff;
   box-shadow: 0 1px 3px oklch(0 0 0 / 0.25);
-  transition: transform 200ms cubic-bezier(0.25, 1, 0.4, 1);
+  transition: transform 200ms var(--ease-out);
 }
 .switch.on .knob {
   transform: translateX(16px);

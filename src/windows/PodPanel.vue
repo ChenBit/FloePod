@@ -31,10 +31,10 @@ const toast = ref("");
 let toastTimer: number | undefined;
 let anchorId: number | null = null;
 
-/* ---------- 固定 / 滑入滑出 ---------- */
+/* ---------- 固定 / 滑入 ---------- */
 const pinned = ref(false);
 const rootEl = ref<HTMLElement | null>(null);
-let exitTimer: number | undefined;
+let lastSlideIn = 0;
 
 function slideDir(): string {
   return edge.value;
@@ -43,28 +43,19 @@ function slideDir(): string {
 function playSlideIn() {
   const el = rootEl.value;
   if (!el) return;
-  el.classList.remove("slide-in", ...slideDirs("in"));
+  // 首挂载时 onMounted 与 PANEL_SHOWN 会先后触发，短窗内去重避免动画重播闪烁
+  const now = performance.now();
+  if (now - lastSlideIn < 100) return;
+  lastSlideIn = now;
+  // 先清除隐藏后遗留的「待显示」透明态，再从头播放滑入
+  el.classList.remove("pre-show");
+  el.classList.remove("slide-in", ...slideDirs());
   void el.offsetWidth;
   el.classList.add("slide-in", `slide-in-${slideDir()}`);
 }
 
-function slideDirs(kind: "in" | "out"): string[] {
-  const dirs = ["left", "right", "top", "bottom"];
-  return dirs.map((d) => (kind === "in" ? `slide-in-${d}` : `slide-out-${d}`));
-}
-
-function startExit() {
-  const el = rootEl.value;
-  if (!el) return;
-  cancelExit();
-  el.classList.add("slide-out", `slide-out-${slideDir()}`);
-  exitTimer = window.setTimeout(() => void ipc.hidePanel(props.podId), 200);
-}
-
-function cancelExit() {
-  window.clearTimeout(exitTimer);
-  exitTimer = undefined;
-  rootEl.value?.classList.remove("slide-out", ...slideDirs("out"));
+function slideDirs(): string[] {
+  return ["left", "right", "top", "bottom"].map((d) => `slide-in-${d}`);
 }
 
 function onTogglePinned() {
@@ -315,25 +306,33 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ---------- 面板尺寸自适应 ---------- */
+/* ---------- 面板尺寸自适应（防抖合并，避免连续 resize 造成跳动） ---------- */
 const listEl = ref<HTMLElement | null>(null);
 let ro: ResizeObserver | null = null;
+let sizeTimer: number | undefined;
 
-watch(
-  () => [mode.value, items.value.length, textOpen.value, selectedCount.value],
-  async () => {
+function scheduleResize() {
+  window.clearTimeout(sizeTimer);
+  sizeTimer = window.setTimeout(async () => {
     await nextTick();
-    if (listEl.value && mode.value === "list") {
-      const h = Math.min(listEl.value.scrollHeight, 560);
+    const el = listEl.value;
+    if (!el) return;
+    if (mode.value === "list") {
+      const h = Math.min(el.scrollHeight, 560);
       await ipc
         .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, h + 118)
         .catch(() => {});
-    } else if (listEl.value) {
+    } else {
       await ipc
-        .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, listEl.value.scrollHeight + 16)
+        .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, el.scrollHeight + 16)
         .catch(() => {});
     }
-  },
+  }, 110);
+}
+
+watch(
+  () => [mode.value, items.value.length, textOpen.value, selectedCount.value],
+  () => scheduleResize(),
 );
 
 onMounted(async () => {
@@ -354,26 +353,29 @@ onMounted(async () => {
   listen<never>(Events.SettingsChanged, () => {});
 
   /* 面板每次出现都重播滑入动画 */
-  listen<never>(Events.PanelShown, () => {
-    cancelExit();
-    playSlideIn();
-  });
+  listen<never>(Events.PanelShown, () => playSlideIn());
   /* 固定状态同步 */
   listen<{ pinned: boolean }>(Events.PanelPinned, (p) => {
     pinned.value = p.pinned;
   });
-  /* 看门狗请求收起：先播滑出动画再隐藏 */
-  listen<never>(Events.PanelHideRequest, () => startExit());
+  /* 窗口已被隐藏：DOM 置为「待显示」透明态，下次显示第一帧不闪现完整内容 */
+  listen<never>(Events.PanelHidden, () => {
+    const el = rootEl.value;
+    if (!el) return;
+    el.classList.remove(
+      "slide-out",
+      "slide-out-left",
+      "slide-out-right",
+      "slide-out-top",
+      "slide-out-bottom",
+    );
+    el.classList.remove("slide-in", ...slideDirs());
+    el.classList.add("pre-show");
+  });
 
   window.addEventListener("keydown", onKeydown);
 
-  ro = new ResizeObserver(() => {
-    if (listEl.value && mode.value === "list") {
-      void ipc
-        .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, listEl.value.scrollHeight + 118)
-        .catch(() => {});
-    }
-  });
+  ro = new ResizeObserver(() => scheduleResize());
   if (listEl.value) ro.observe(listEl.value);
 
   await nextTick();
@@ -384,11 +386,10 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   ro?.disconnect();
   window.clearTimeout(toastTimer);
-  cancelExit();
+  window.clearTimeout(sizeTimer);
 });
 
 function onPointerEnter() {
-  cancelExit();
   void ipc.reportPresence(props.podId, "panel", true);
 }
 function onPointerLeave() {
@@ -529,14 +530,19 @@ function onPointerLeave() {
   display: flex;
   flex-direction: column;
   background: var(--glass);
-  border-radius: var(--radius-panel);
+  /* 圆角由 Windows 系统窗口自带（DWM），CSS 再切一次会双重圆角导致边缘不平 */
   box-shadow: inset 0 0 0 1px var(--glass-line);
   overflow: hidden;
+}
+/* 隐藏后保持的「待显示」透明态：窗口显示第一帧不闪现完整内容 */
+.panel-root.pre-show {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
 }
 /* 滑入 / 滑出：方向由匣所在屏幕边缘决定 */
 .panel-root.slide-in {
   animation-duration: 260ms;
-  animation-timing-function: cubic-bezier(0.3, 1, 0.4, 1);
+  animation-timing-function: var(--ease-out);
   animation-fill-mode: both;
 }
 .panel-root.slide-in-left {
@@ -551,23 +557,7 @@ function onPointerLeave() {
 .panel-root.slide-in-bottom {
   animation-name: slide-in-bottom;
 }
-.panel-root.slide-out {
-  animation-duration: 200ms;
-  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
-  animation-fill-mode: forwards;
-}
-.panel-root.slide-out-left {
-  animation-name: slide-out-left;
-}
-.panel-root.slide-out-right {
-  animation-name: slide-out-right;
-}
-.panel-root.slide-out-top {
-  animation-name: slide-out-top;
-}
-.panel-root.slide-out-bottom {
-  animation-name: slide-out-bottom;
-}
+/* 收回动画已移除：直接隐藏窗口，交由 Windows 自带的窗口关闭动画 */
 @keyframes slide-in-left {
   from { opacity: 0; transform: translateX(-30px) scale(0.98); }
 }
@@ -580,21 +570,8 @@ function onPointerLeave() {
 @keyframes slide-in-bottom {
   from { opacity: 0; transform: translateY(30px) scale(0.98); }
 }
-@keyframes slide-out-left {
-  to { opacity: 0; transform: translateX(-38px) scale(0.98); }
-}
-@keyframes slide-out-right {
-  to { opacity: 0; transform: translateX(38px) scale(0.98); }
-}
-@keyframes slide-out-top {
-  to { opacity: 0; transform: translateY(-38px) scale(0.98); }
-}
-@keyframes slide-out-bottom {
-  to { opacity: 0; transform: translateY(38px) scale(0.98); }
-}
 @media (prefers-reduced-motion: reduce) {
-  .panel-root.slide-in,
-  .panel-root.slide-out {
+  .panel-root.slide-in {
     animation: fade-only 150ms ease;
   }
   @keyframes fade-only {
@@ -676,7 +653,7 @@ function onPointerLeave() {
   gap: 2px;
 }
 .list-enter-active {
-  transition: opacity 220ms ease, transform 280ms cubic-bezier(0.3, 1, 0.4, 1);
+  transition: opacity 220ms ease, transform 280ms var(--ease-out);
 }
 .list-leave-active {
   transition: opacity 140ms ease;
@@ -691,7 +668,7 @@ function onPointerLeave() {
   opacity: 0;
 }
 .list-move {
-  transition: transform 280ms cubic-bezier(0.3, 1, 0.4, 1);
+  transition: transform 280ms var(--ease-out);
 }
 
 .panel-foot {
@@ -812,7 +789,7 @@ function onPointerLeave() {
 }
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.3, 1, 0.4, 1);
+  transition: opacity 180ms ease, transform 240ms var(--ease-out);
 }
 .toast-enter-from,
 .toast-leave-to {

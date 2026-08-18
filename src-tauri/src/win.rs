@@ -58,3 +58,20 @@ pub fn hide_window(hwnd: isize) {
         ShowWindow(hwnd, SW_HIDE);
     }
 }
+
+/// 禁用 Windows 11 的系统窗口圆角（DWMWCP_DONOTROUND）。
+/// 胶囊条等自绘形状的窗口需要：系统圆角会把贴边的圆角矩形裁掉。
+pub fn disable_rounding(hwnd: isize) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+    };
+    unsafe {
+        let pref: i32 = DWMWCP_DONOTROUND;
+        DwmSetWindowAttribute(
+            hwnd as *mut c_void,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &pref as *const i32 as *const c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}

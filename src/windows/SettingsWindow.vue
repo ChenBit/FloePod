@@ -2,6 +2,8 @@
 /**
  * 设置窗口：OOBE 首启引导 / 常规 / 匣管理 / 快捷键 / 关于。
  * 所有修改即时保存（save -> Rust 持久化并广播 settings_changed）。
+ * 排版原则：单一强调色、层级靠字号与留白、分区标题建立可扫视结构、
+ * 进入/切换动画统一使用出程缓动（--ease-out）。
  */
 import { computed, onMounted, ref } from "vue";
 import { ipc } from "@/lib/ipc";
@@ -47,6 +49,38 @@ const EDGES: { value: Edge; label: string }[] = [
   { value: "bottom", label: "下" },
   { value: "left", label: "左" },
 ];
+
+const DROP_ACTIONS: { value: string; label: string }[] = [
+  { value: "ask", label: "询问" },
+  { value: "copy", label: "复制" },
+  { value: "move", label: "移动" },
+  { value: "shortcut", label: "快捷方式" },
+];
+
+const MATERIALS: { value: Material; label: string }[] = [
+  { value: "acrylic", label: "亚克力" },
+  { value: "plain", label: "纯半透明" },
+];
+
+const THEMES: { value: ThemeMode; label: string }[] = [
+  { value: "system", label: "跟随系统" },
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+];
+
+/** 侧栏导航图标（单线条，随 currentColor） */
+const NAV_ICONS: Record<string, string> = {
+  general:
+    '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M2 14h4M10 8h4M18 16h4"/>',
+  pods: '<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M12 8v8M8 12h8"/>',
+  hotkeys:
+    '<rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M7.5 12h.01M12 12h.01M16.5 12h.01M10 15h4"/>',
+  about: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
+};
+
+function edgeLabel(edge: string): string {
+  return edge === "left" ? "左" : edge === "right" ? "右" : edge === "top" ? "上" : "下";
+}
 
 function showToast(msg: string) {
   toast.value = msg;
@@ -328,14 +362,7 @@ const PAGES = [
           <div class="oobe-form">
             <label class="field">
               <span>主题</span>
-              <SegmentedControl
-                :options="[
-                  { value: 'system', label: '跟随系统' },
-                  { value: 'light', label: '浅色' },
-                  { value: 'dark', label: '深色' },
-                ]"
-                v-model="oobe.theme"
-              />
+              <SegmentedControl :options="THEMES" v-model="oobe.theme" />
             </label>
             <label class="field">
               <span>不透明度</span>
@@ -343,13 +370,7 @@ const PAGES = [
             </label>
             <label class="field">
               <span>材质</span>
-              <SegmentedControl
-                :options="[
-                  { value: 'acrylic', label: '亚克力' },
-                  { value: 'plain', label: '纯半透明' },
-                ]"
-                v-model="oobe.material"
-              />
+              <SegmentedControl :options="MATERIALS" v-model="oobe.material" />
             </label>
           </div>
           <div class="oobe-actions">
@@ -362,7 +383,7 @@ const PAGES = [
       </div>
     </div>
 
-    <!-- 常规设置 -->
+    <!-- 设置主体 -->
     <template v-else>
       <div class="settings-body">
         <aside class="nav">
@@ -379,6 +400,20 @@ const PAGES = [
               :class="{ active: page === p.id }"
               @pointerdown="page = p.id"
             >
+              <svg
+                class="nav-ico"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <g v-html="NAV_ICONS[p.id]" />
+              </svg>
               {{ p.label }}
             </button>
           </nav>
@@ -386,169 +421,191 @@ const PAGES = [
         </aside>
 
         <main class="content">
-          <!-- 常规 -->
-          <section v-show="page === 'general'">
-            <h2 class="page-title">常规</h2>
-            <SettingsRow label="主题">
-              <SegmentedControl
-                :options="[
-                  { value: 'system', label: '跟随系统' },
-                  { value: 'light', label: '浅色' },
-                  { value: 'dark', label: '深色' },
-                ]"
-                :model-value="s.theme"
-                @update:model-value="(v) => save({ theme: v as never })"
-              />
-            </SettingsRow>
-            <div class="sep" />
-            <SettingsRow label="开机自启" hint="以托盘常驻方式随 Windows 启动">
-              <ToggleSwitch
-                :model-value="s.autostart"
-                @update:model-value="(v) => save({ autostart: v })"
-              />
-            </SettingsRow>
-            <div class="sep" />
-            <SettingsRow label="退出浮匣" hint="关闭所有匣并退出程序（托盘仍可退出）">
-              <button type="button" class="btn" @pointerdown="ipc.quitApp()">退出</button>
-            </SettingsRow>
-          </section>
+          <Transition name="page" mode="out-in">
+            <section :key="page">
+              <!-- 常规 -->
+              <template v-if="page === 'general'">
+                <h2 class="page-title">常规</h2>
+                <p class="page-desc">浮匣的整体外观与行为。</p>
+                <div class="settings-card">
+                  <SettingsRow label="主题" hint="跟随系统会随 Windows 深浅色自动切换">
+                    <SegmentedControl :options="THEMES" :model-value="s.theme" @update:model-value="(v) => save({ theme: v as never })" />
+                  </SettingsRow>
+                  <div class="sep" />
+                  <SettingsRow label="开机自启" hint="以托盘常驻方式随 Windows 启动">
+                    <ToggleSwitch :model-value="s.autostart" @update:model-value="(v) => save({ autostart: v })" />
+                  </SettingsRow>
+                  <div class="sep" />
+                  <SettingsRow label="退出浮匣" hint="关闭所有匣并退出程序（托盘仍可退出）">
+                    <button type="button" class="btn" @pointerdown="ipc.quitApp()">退出</button>
+                  </SettingsRow>
+                </div>
+              </template>
 
-          <!-- 匣管理 -->
-          <section v-show="page === 'pods'">
-            <div class="page-head">
-              <h2 class="page-title">匣</h2>
-              <button type="button" class="btn" @pointerdown="addPod">+ 新建匣</button>
-            </div>
-            <p class="page-desc">
-              每个匣是贴在屏幕边缘的独立暂存点，可分别设置位置、显示器和保存文件夹。
-            </p>
-
-            <div class="pod-list">
-              <div v-for="pod in s.pods" :key="pod.id" class="pod-card" :class="{ off: !pod.enabled }">
-                <div class="pod-head">
-                  <input
-                    :value="pod.name"
-                    class="pod-name-input"
-                    maxlength="12"
-                    @change="(e) => savePod(pod.id, { name: (e.target as HTMLInputElement).value })"
-                  />
-                  <span class="pod-edge-tag">{{ pod.edge === 'left' ? '左' : pod.edge === 'right' ? '右' : pod.edge === 'top' ? '上' : '下' }}</span>
-                  <div class="pod-head-ops">
-                    <ToggleSwitch
-                      :model-value="pod.enabled"
-                      @update:model-value="(v) => savePod(pod.id, { enabled: v })"
-                    />
-                    <button type="button" class="op-btn danger" title="删除此匣" @pointerdown="removePod(pod)">删除</button>
+              <!-- 匣管理 -->
+              <template v-else-if="page === 'pods'">
+                <div class="page-head">
+                  <div>
+                    <h2 class="page-title">匣</h2>
+                    <p class="page-desc">每个匣是贴在屏幕边缘的独立暂存点，可分别设置位置、显示器和保存文件夹。</p>
                   </div>
+                  <button type="button" class="btn" @pointerdown="addPod">+ 新建匣</button>
                 </div>
 
-                <div class="pod-grid">
-                  <div class="pg-item">
-                    <span class="pg-label">屏幕边缘</span>
-                    <SegmentedControl :options="EDGES" :model-value="pod.edge" @update:model-value="(v) => savePod(pod.id, { edge: v as Edge })" />
-                  </div>
-                  <div class="pg-item">
-                    <span class="pg-label">显示器</span>
-                    <select :value="pod.monitor" class="input" @change="(e) => savePod(pod.id, { monitor: (e.target as HTMLSelectElement).value })">
-                      <option value="">主显示器</option>
-                      <option v-for="m in monitors" :key="m.name" :value="m.name">{{ m.label }}</option>
-                    </select>
-                  </div>
-                  <div class="pg-item">
-                    <span class="pg-label">沿边缘位置 {{ Math.round(pod.offset * 100) }}%</span>
-                    <input type="range" class="slider" min="0" max="1" step="0.01" :value="pod.offset" @input="(e) => savePod(pod.id, { offset: Number((e.target as HTMLInputElement).value) })" />
-                  </div>
-                  <div class="pg-item">
-                    <span class="pg-label">保存文件夹</span>
-                    <div class="folder-line">
-                      <input :value="pod.stagingFolder" class="input mono" readonly :title="pod.stagingFolder" placeholder="未选择" />
-                      <button type="button" class="btn" @pointerdown="async () => { const f = await pickFolder(); if (f) await savePod(pod.id, { stagingFolder: f }); }">选择…</button>
-                      <button v-if="pod.stagingFolder" type="button" class="btn ghost" @pointerdown="openPodFolder(pod)">打开</button>
+                <TransitionGroup name="pod" tag="div" class="pod-list">
+                  <div v-for="pod in s.pods" :key="pod.id" class="pod-card" :class="{ off: !pod.enabled }">
+                    <div class="pod-head">
+                      <input
+                        :value="pod.name"
+                        class="pod-name-input"
+                        maxlength="12"
+                        @change="(e) => savePod(pod.id, { name: (e.target as HTMLInputElement).value })"
+                      />
+                      <span class="pod-edge-tag">{{ edgeLabel(pod.edge) }}</span>
+                      <div class="pod-head-ops">
+                        <ToggleSwitch
+                          :model-value="pod.enabled"
+                          @update:model-value="(v) => savePod(pod.id, { enabled: v })"
+                        />
+                        <button type="button" class="op-btn danger" title="删除此匣" @pointerdown="removePod(pod)">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M5 7h14M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m3 0-1 13a1.5 1.5 0 0 1-1.5 1.4h-7A1.5 1.5 0 0 1 6.5 20L5.5 7" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div class="pod-groups">
+                      <div class="pod-group">
+                        <div class="group-title">位置</div>
+                        <div class="frow">
+                          <span class="flabel">屏幕边缘</span>
+                          <div class="fctrl">
+                            <SegmentedControl :options="EDGES" :model-value="pod.edge" @update:model-value="(v) => savePod(pod.id, { edge: v as Edge })" />
+                          </div>
+                        </div>
+                        <div class="frow">
+                          <span class="flabel">显示器</span>
+                          <div class="fctrl">
+                            <select :value="pod.monitor" class="input sel" @change="(e) => savePod(pod.id, { monitor: (e.target as HTMLSelectElement).value })">
+                              <option value="">主显示器</option>
+                              <option v-for="m in monitors" :key="m.name" :value="m.name">{{ m.label }}</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div class="frow">
+                          <span class="flabel">沿边缘位置</span>
+                          <div class="fctrl">
+                            <input type="range" class="slider" min="0" max="1" step="0.01" :value="pod.offset" @input="(e) => savePod(pod.id, { offset: Number((e.target as HTMLInputElement).value) })" />
+                            <span class="fval">{{ Math.round(pod.offset * 100) }}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="pod-group">
+                        <div class="group-title">外观</div>
+                        <div class="frow">
+                          <span class="flabel">不透明度</span>
+                          <div class="fctrl">
+                            <input type="range" class="slider" min="0.55" max="1" step="0.05" :value="pod.opacity" @input="(e) => savePod(pod.id, { opacity: Number((e.target as HTMLInputElement).value) })" />
+                            <span class="fval">{{ Math.round(pod.opacity * 100) }}%</span>
+                          </div>
+                        </div>
+                        <div class="frow">
+                          <span class="flabel">材质</span>
+                          <div class="fctrl">
+                            <SegmentedControl :options="MATERIALS" :model-value="pod.material" @update:model-value="(v) => savePod(pod.id, { material: v as Material })" />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="pod-group">
+                        <div class="group-title">面板</div>
+                        <div class="frow">
+                          <span class="flabel">面板宽度</span>
+                          <div class="fctrl">
+                            <input type="range" class="slider" min="300" max="520" step="10" :value="pod.panelWidth" @input="(e) => savePod(pod.id, { panelWidth: Number((e.target as HTMLInputElement).value) })" />
+                            <span class="fval">{{ pod.panelWidth }}px</span>
+                          </div>
+                        </div>
+                        <div class="frow">
+                          <span class="flabel">悬停展开延迟</span>
+                          <div class="fctrl">
+                            <input type="range" class="slider" min="0" max="400" step="20" :value="pod.hoverDelayMs" @input="(e) => savePod(pod.id, { hoverDelayMs: Number((e.target as HTMLInputElement).value) })" />
+                            <span class="fval">{{ pod.hoverDelayMs }}ms</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div class="pod-group">
+                        <div class="group-title">拖入</div>
+                        <div class="frow">
+                          <span class="flabel">落地动作</span>
+                          <div class="fctrl">
+                            <SegmentedControl :options="DROP_ACTIONS" :model-value="pod.dropAction" @update:model-value="(v) => savePod(pod.id, { dropAction: v as never })" />
+                          </div>
+                        </div>
+                        <div class="frow folder-row">
+                          <span class="flabel">暂存文件夹</span>
+                          <div class="fctrl folder-line">
+                            <input :value="pod.stagingFolder" class="input mono" readonly :title="pod.stagingFolder" placeholder="未选择" />
+                            <button type="button" class="btn" @pointerdown="async () => { const f = await pickFolder(); if (f) await savePod(pod.id, { stagingFolder: f }); }">选择…</button>
+                            <button v-if="pod.stagingFolder" type="button" class="btn ghost" @pointerdown="openPodFolder(pod)">打开</button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div class="pg-item">
-                    <span class="pg-label">不透明度 {{ Math.round(pod.opacity * 100) }}%</span>
-                    <input type="range" class="slider" min="0.55" max="1" step="0.05" :value="pod.opacity" @input="(e) => savePod(pod.id, { opacity: Number((e.target as HTMLInputElement).value) })" />
+                </TransitionGroup>
+              </template>
+
+              <!-- 快捷键 -->
+              <template v-else-if="page === 'hotkeys'">
+                <h2 class="page-title">快捷键</h2>
+                <p class="page-desc">全局快捷键，点击后按下新组合即可修改。</p>
+                <div class="settings-card">
+                  <SettingsRow label="显示 / 隐藏全部匣">
+                    <HotkeyRecorder :model-value="s.hotkeys.toggleBar" @update:model-value="(v) => saveHotkey('toggleBar', v)" />
+                  </SettingsRow>
+                  <div class="sep" />
+                  <SettingsRow label="收集剪贴板文字" hint="把当前剪贴板里的文字存为第一匣的暂存">
+                    <HotkeyRecorder :model-value="s.hotkeys.collectClipboard" @update:model-value="(v) => saveHotkey('collectClipboard', v)" />
+                  </SettingsRow>
+                  <div class="sep" />
+                  <SettingsRow label="打开第一匣面板">
+                    <HotkeyRecorder :model-value="s.hotkeys.openPanel" @update:model-value="(v) => saveHotkey('openPanel', v)" />
+                  </SettingsRow>
+                </div>
+                <p v-if="hotkeyError" class="error">{{ hotkeyError }}</p>
+                <div class="reset-line">
+                  <button type="button" class="btn ghost" @pointerdown="resetHotkeys">恢复默认快捷键</button>
+                </div>
+              </template>
+
+              <!-- 关于 -->
+              <template v-else>
+                <div class="about-hero">
+                  <BrandMark :size="48" class="about-brand" />
+                  <div class="about-name">浮匣 FloePod</div>
+                  <div class="about-ver">版本 {{ s.version }}</div>
+                </div>
+                <p class="about-text">
+                  本地优先的屏幕边缘暂存工具：拖进来集中保管，拖出去继续使用。
+                  不联网、不收集数据，所有内容只存在你自己的电脑上。
+                </p>
+                <div class="about-meta">
+                  <div class="about-row">
+                    <span class="about-key">数据位置</span>
+                    <span class="about-val">{{ s.dataDir }}</span>
                   </div>
-                  <div class="pg-item">
-                    <span class="pg-label">材质</span>
-                    <SegmentedControl
-                      :options="[
-                        { value: 'acrylic', label: '亚克力' },
-                        { value: 'plain', label: '纯半透明' },
-                      ]"
-                      :model-value="pod.material"
-                      @update:model-value="(v) => savePod(pod.id, { material: v as Material })"
-                    />
-                  </div>
-                  <div class="pg-item">
-                    <span class="pg-label">面板宽度 {{ pod.panelWidth }}px</span>
-                    <input type="range" class="slider" min="300" max="520" step="10" :value="pod.panelWidth" @input="(e) => savePod(pod.id, { panelWidth: Number((e.target as HTMLInputElement).value) })" />
-                  </div>
-                  <div class="pg-item">
-                    <span class="pg-label">悬停展开延迟 {{ pod.hoverDelayMs }}ms</span>
-                    <input type="range" class="slider" min="0" max="400" step="20" :value="pod.hoverDelayMs" @input="(e) => savePod(pod.id, { hoverDelayMs: Number((e.target as HTMLInputElement).value) })" />
-                  </div>
-                  <div class="pg-item">
-                    <span class="pg-label">拖入时</span>
-                    <SegmentedControl
-                      :options="[
-                        { value: 'ask', label: '询问' },
-                        { value: 'copy', label: '复制' },
-                        { value: 'move', label: '移动' },
-                        { value: 'shortcut', label: '快捷方式' },
-                      ]"
-                      :model-value="pod.dropAction"
-                      @update:model-value="(v) => savePod(pod.id, { dropAction: v as never })"
-                    />
+                  <div class="about-row">
+                    <span class="about-key">匣的数量</span>
+                    <span class="about-val">{{ s.pods.length }} 个</span>
                   </div>
                 </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- 快捷键 -->
-          <section v-show="page === 'hotkeys'">
-            <h2 class="page-title">快捷键</h2>
-            <SettingsRow label="显示 / 隐藏全部匣">
-              <HotkeyRecorder :model-value="s.hotkeys.toggleBar" @update:model-value="(v) => saveHotkey('toggleBar', v)" />
-            </SettingsRow>
-            <div class="sep" />
-            <SettingsRow label="收集剪贴板文字" hint="把当前剪贴板里的文字存为第一匣的暂存">
-              <HotkeyRecorder :model-value="s.hotkeys.collectClipboard" @update:model-value="(v) => saveHotkey('collectClipboard', v)" />
-            </SettingsRow>
-            <div class="sep" />
-            <SettingsRow label="打开第一匣面板">
-              <HotkeyRecorder :model-value="s.hotkeys.openPanel" @update:model-value="(v) => saveHotkey('openPanel', v)" />
-            </SettingsRow>
-            <p v-if="hotkeyError" class="error">{{ hotkeyError }}</p>
-            <div class="reset-line">
-              <button type="button" class="btn ghost" @pointerdown="resetHotkeys">恢复默认快捷键</button>
-            </div>
-          </section>
-
-          <!-- 关于 -->
-          <section v-show="page === 'about'">
-            <div class="about-hero">
-              <BrandMark :size="48" class="about-brand" />
-              <div class="about-name">浮匣 FloePod</div>
-              <div class="about-ver">版本 {{ s.version }}</div>
-            </div>
-            <p class="about-text">
-              本地优先的屏幕边缘暂存工具：拖进来集中保管，拖出去继续使用。
-              不联网、不收集数据，所有内容只存在你自己的电脑上。
-            </p>
-            <div class="about-meta">
-              <div class="about-row">
-                <span class="about-key">数据位置</span>
-                <span class="about-val">{{ s.dataDir }}</span>
-              </div>
-              <div class="about-row">
-                <span class="about-key">匣的数量</span>
-                <span class="about-val">{{ s.pods.length }} 个</span>
-              </div>
-            </div>
-          </section>
+              </template>
+            </section>
+          </Transition>
         </main>
       </div>
     </template>
@@ -569,7 +626,7 @@ const PAGES = [
   color: var(--ink);
 }
 
-/* 自绘标题栏：整条可拖拽，左侧标题，右侧窗口控制 */
+/* ---------- 自绘标题栏 ---------- */
 .titlebar {
   flex-shrink: 0;
   height: 34px;
@@ -577,7 +634,7 @@ const PAGES = [
   align-items: center;
   justify-content: space-between;
   padding-left: 14px;
-  background: #ffffff;
+  background: var(--surface-raised);
   user-select: none;
 }
 .titlebar-title {
@@ -600,10 +657,10 @@ const PAGES = [
   color: var(--ink-2);
   cursor: pointer;
   font-family: inherit;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
 }
 .tb-btn:hover {
-  background: var(--surface-3);
+  background: var(--surface-hover);
   color: var(--ink);
 }
 .tb-btn.close:hover {
@@ -629,7 +686,7 @@ const PAGES = [
   align-items: center;
   gap: 16px;
   text-align: center;
-  background: #ffffff;
+  background: var(--surface-raised);
   border-radius: 18px;
   box-shadow: var(--shadow-panel), 0 0 0 1px var(--line);
   padding: 34px 30px;
@@ -687,9 +744,9 @@ const PAGES = [
   min-height: 0;
 }
 .nav {
-  width: 168px;
+  width: 172px;
   flex-shrink: 0;
-  background: #ffffff;
+  background: var(--surface-raised);
   display: flex;
   flex-direction: column;
   padding: 18px 10px 14px;
@@ -702,7 +759,7 @@ const PAGES = [
   font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.01em;
-  padding: 0 10px 16px;
+  padding: 0 10px 18px;
 }
 .brand-icon {
   color: var(--accent);
@@ -716,8 +773,10 @@ const PAGES = [
   position: relative;
   display: flex;
   align-items: center;
+  gap: 10px;
   border: 0;
   background: transparent;
+  width: 100%;
   text-align: left;
   padding: 8px 12px;
   border-radius: 8px;
@@ -725,16 +784,23 @@ const PAGES = [
   color: var(--ink-2);
   cursor: pointer;
   font-family: inherit;
-  transition: background 120ms ease, color 120ms ease;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+}
+.nav-ico {
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 .nav-item:hover {
-  background: #f2f4f7;
+  background: var(--surface-hover);
   color: var(--ink);
 }
 .nav-item.active {
-  background: #eef3f8;
-  color: var(--ink);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
+}
+.nav-item.active .nav-ico {
+  opacity: 1;
 }
 .nav-foot {
   margin-top: auto;
@@ -753,31 +819,56 @@ const PAGES = [
   font-size: 19px;
   font-weight: 650;
   letter-spacing: -0.015em;
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 .page-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-}
-.page-head .page-title {
-  margin-bottom: 0;
+  gap: 20px;
 }
 .page-desc {
   font-size: 12.5px;
   color: var(--ink-3);
   line-height: 1.65;
-  margin: 8px 0 16px;
+  margin: 0 0 18px;
+}
+.page-head .page-desc {
+  margin-bottom: 18px;
 }
 .sep {
   height: 1px;
   background: var(--line);
+  margin: 0 16px;
+}
+.settings-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  overflow: hidden;
+}
+.settings-card :deep(.row) {
+  padding: 14px 16px;
+}
+
+/* ---------- 页面切换 ---------- */
+.page-enter-active,
+.page-leave-active {
+  transition: opacity 170ms ease, transform 240ms var(--ease-out);
+}
+.page-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.page-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
 }
 
 /* ---------- 控件 ---------- */
 .btn {
   border: 1px solid var(--line-strong);
-  background: #ffffff;
+  background: var(--surface-raised);
   color: var(--ink);
   border-radius: 8px;
   padding: 6px 13px;
@@ -785,13 +876,14 @@ const PAGES = [
   font-weight: 550;
   cursor: pointer;
   font-family: inherit;
-  transition: background 120ms ease, transform 100ms ease;
+  transition: background 150ms var(--ease-out), border-color 150ms var(--ease-out),
+    transform 100ms var(--ease-out);
 }
 .btn:active {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 .btn:hover {
-  background: var(--surface-2);
+  background: var(--surface-hover);
 }
 .btn.primary {
   background: var(--accent);
@@ -818,7 +910,7 @@ const PAGES = [
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 12.5px;
-  background: #ffffff;
+  background: var(--surface-raised);
   color: var(--ink);
   outline: none;
   font-family: inherit;
@@ -835,8 +927,11 @@ const PAGES = [
 select.input {
   cursor: pointer;
 }
+.input.sel {
+  min-width: 140px;
+}
 .slider {
-  width: 170px;
+  width: 150px;
   accent-color: var(--accent);
 }
 .folder-line {
@@ -863,8 +958,8 @@ select.input {
 .pod-card {
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffffff;
-  padding: 14px 16px;
+  background: var(--surface-raised);
+  padding: 16px 18px;
 }
 .pod-card.off {
   opacity: 0.6;
@@ -873,12 +968,14 @@ select.input {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
   margin-bottom: 12px;
 }
 .pod-name-input {
   border: 0;
   background: transparent;
-  font-size: 14.5px;
+  font-size: 15px;
   font-weight: 650;
   color: var(--ink);
   outline: none;
@@ -887,7 +984,7 @@ select.input {
   border-radius: 6px;
 }
 .pod-name-input:focus {
-  background: var(--surface-2);
+  background: var(--surface-hover);
 }
 .pod-edge-tag {
   font-size: 11px;
@@ -906,36 +1003,87 @@ select.input {
 .op-btn {
   border: 0;
   background: transparent;
-  color: var(--ink-2);
-  font-size: 12px;
-  padding: 5px 8px;
-  border-radius: 7px;
+  color: var(--ink-3);
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
   font-family: inherit;
+  transition: background 150ms var(--ease-out), color 150ms var(--ease-out);
 }
 .op-btn:hover {
-  background: var(--surface-3);
+  background: var(--surface-hover);
   color: var(--ink);
 }
 .op-btn.danger:hover {
   background: color-mix(in oklab, var(--danger) 14%, transparent);
   color: var(--danger);
 }
-.pod-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 14px 20px;
-}
-.pg-item {
+
+/* 分组字段：标签左对齐，控件右对齐，分区标题建立扫视结构 */
+.pod-groups {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 2px;
+}
+.group-title {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+  margin: 10px 0 2px;
+}
+.pod-group:first-child .group-title {
+  margin-top: 0;
+}
+.frow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 5px 0;
+}
+.flabel {
+  font-size: 13px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.fctrl {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   min-width: 0;
 }
-.pg-label {
+.fval {
+  min-width: 40px;
+  text-align: right;
   font-size: 12px;
-  color: var(--ink-2);
-  font-weight: 550;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.folder-row .folder-line {
+  max-width: 460px;
+}
+
+/* ---------- 匣列表过渡 ---------- */
+.pod-enter-active {
+  transition: opacity 220ms ease, transform 280ms var(--ease-out);
+}
+.pod-enter-from {
+  opacity: 0;
+  transform: translateY(10px);
+}
+.pod-leave-active {
+  transition: opacity 140ms ease;
+}
+.pod-leave-to {
+  opacity: 0;
+}
+.pod-move {
+  transition: transform 280ms var(--ease-out);
 }
 
 /* ---------- 关于 ---------- */
@@ -971,7 +1119,7 @@ select.input {
   margin: 0 auto;
   border: 1px solid var(--line);
   border-radius: 12px;
-  background: #ffffff;
+  background: var(--surface-raised);
   overflow: hidden;
 }
 .about-row {
@@ -1009,7 +1157,7 @@ select.input {
 }
 .toast-enter-active,
 .toast-leave-active {
-  transition: opacity 180ms ease, transform 220ms cubic-bezier(0.3, 1, 0.4, 1);
+  transition: opacity 180ms ease, transform 240ms var(--ease-out);
 }
 .toast-enter-from,
 .toast-leave-to {

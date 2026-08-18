@@ -131,9 +131,15 @@ pub fn place_panel_dyn(app: &AppHandle, pod_id: u64) {
 fn place_panel(app: &AppHandle, pod: &Pod) {
     let Some(panel) = pod_panel(app, pod.id) else { return };
     let state = app.state::<AppState>();
+    // panel_height 为 0（前端尚未上报）时用默认值：否则会按最小高度显示，
+    // 待前端上报后再 resize，造成「显示后跳一下」的闪烁。
     let ph = {
         let guard = state.pods.lock().unwrap();
-        guard.get(&pod.id).map(|r| r.panel_height).unwrap_or(420)
+        guard
+            .get(&pod.id)
+            .map(|r| r.panel_height)
+            .filter(|&h| h > 0)
+            .unwrap_or(420)
     };
     let scale = panel.scale_factor().unwrap_or(1.0);
     let pw = (pod.panel_width as f64 * scale).round() as i32;
@@ -189,6 +195,13 @@ fn ensure_pod_windows(app: &AppHandle, pod: &Pod) {
         .shadow(true)
         .visible(false)
         .build();
+    }
+    // 胶囊条形状由前端自绘：禁用 Windows 11 系统窗口圆角，
+    // 否则 DWM 圆角会把贴边的圆角矩形裁掉，看起来「显示不全」。
+    if let Some(bar) = pod_bar(app, pod.id) {
+        if let Ok(hwnd) = bar.hwnd() {
+            win::disable_rounding(hwnd.0 as isize);
+        }
     }
     place_pod_bar(app, pod, false);
 }
@@ -247,6 +260,29 @@ fn apply_material(window: &WebviewWindow, material: &str) {
     }
 }
 
+/// 仅在材质变化时重设窗口效果：每次显示都重设亚克力会引起重绘闪烁。
+fn apply_material_once(app: &AppHandle, material: &str, id: u64) {
+    let changed = {
+        let state = app.state::<AppState>();
+        let mut guard = state.pods.lock().unwrap();
+        if let Some(r) = guard.get_mut(&id) {
+            if r.material.as_deref() == Some(material) {
+                false
+            } else {
+                r.material = Some(material.to_string());
+                true
+            }
+        } else {
+            false
+        }
+    };
+    if changed {
+        if let Some(panel) = pod_panel(app, id) {
+            apply_material(&panel, material);
+        }
+    }
+}
+
 /* ---------- 面板显隐（按匣） ---------- */
 
 pub fn emit_panel_mode(app: &AppHandle, id: u64) {
@@ -272,23 +308,37 @@ pub fn emit_panel_pinned(app: &AppHandle, id: u64) {
     }
 }
 
+/// 单一活动面板：收起除 id 外所有「可见、未固定、列表模式」的面板。
+/// 固定（panel_pinned）以及正在拖入询问/冲突解决（mode != List）的面板不受影响。
+/// 直接 SW_HIDE（无收起动画，Windows 自带窗口关闭动画），消除切换时的重叠竞争闪烁。
+fn dismiss_other_panels(app: &AppHandle, id: u64) {
+    let state = app.state::<AppState>();
+    let others: Vec<u64> = {
+        let guard = state.pods.lock().unwrap();
+        guard
+            .iter()
+            .filter(|(pid, r)| {
+                **pid != id && r.panel_visible && !r.panel_pinned && r.mode == PanelMode::List
+            })
+            .map(|(pid, _)| *pid)
+            .collect()
+    };
+    for pid in others {
+        hide_panel(app, pid);
+    }
+}
+
 pub fn show_panel(app: &AppHandle, id: u64) {
     let state = app.state::<AppState>();
+    // 单一活动面板：显示前先收起其他未固定的列表面板
+    dismiss_other_panels(app, id);
     {
         let mut guard = state.pods.lock().unwrap();
         let r = guard.entry(id).or_default();
         if r.panel_visible {
-            // 正在动画收起中被再次唤起：取消收起，重播滑入
-            if r.panel_hiding {
-                r.panel_hiding = false;
-                if let Some(panel) = pod_panel(app, id) {
-                    let _ = panel.emit(events::PANEL_SHOWN, ());
-                }
-            }
             return;
         }
         r.panel_visible = true;
-        r.panel_hiding = false;
     }
     let Some(pod) = pod_of(app, id) else {
         state.pods.lock().unwrap().get_mut(&id).map(|r| r.panel_visible = false);
@@ -296,7 +346,7 @@ pub fn show_panel(app: &AppHandle, id: u64) {
     };
     if let Some(panel) = pod_panel(app, id) {
         place_panel(app, &pod);
-        apply_material(&panel, &pod.material);
+        apply_material_once(app, &pod.material, id);
         if let Ok(hwnd) = panel.hwnd() {
             win::show_no_activate(hwnd.0 as isize);
             emit_panel_mode(app, id);
@@ -312,6 +362,8 @@ pub fn hide_panel(app: &AppHandle, id: u64) {
         if let Ok(hwnd) = panel.hwnd() {
             win::hide_window(hwnd.0 as isize);
         }
+        // 通知前端进入「待显示」透明态：下次显示第一帧不闪现完整内容
+        let _ = panel.emit(events::PANEL_HIDDEN, ());
     }
     let state = app.state::<AppState>();
     {
@@ -319,7 +371,6 @@ pub fn hide_panel(app: &AppHandle, id: u64) {
         if let Some(r) = guard.get_mut(&id) {
             r.panel_visible = false;
             r.panel_pinned = false;
-            r.panel_hiding = false;
             r.mode = PanelMode::List;
             r.pending_drop.clear();
         }
@@ -357,7 +408,6 @@ pub fn set_panel_pinned(app: &AppHandle, id: u64, pinned: bool) {
         }
         pods_guard(&state).get_mut(&id).map(|r| {
             r.panel_pinned = true;
-            r.panel_hiding = false;
         });
     } else {
         pods_guard(&state).get_mut(&id).map(|r| r.panel_pinned = false);
@@ -371,18 +421,31 @@ pub fn set_dragging_out(app: &AppHandle, id: u64, dragging: bool) {
 }
 
 pub fn report_presence(app: &AppHandle, id: u64, window: &str, inside: bool) {
-    let state = app.state::<AppState>();
-    let mut guard = pods_guard(&state);
-    let r = guard.entry(id).or_default();
-    match window {
-        "bar" => r.bar_inside = inside,
-        "panel" => r.panel_inside = inside,
-        _ => {}
+    {
+        let state = app.state::<AppState>();
+        let mut guard = pods_guard(&state);
+        let r = guard.entry(id).or_default();
+        match window {
+            "bar" => r.bar_inside = inside,
+            "panel" => r.panel_inside = inside,
+            _ => {}
+        }
+        r.last_change = Some(Instant::now());
     }
-    r.last_change = Some(Instant::now());
-    // 指针回到任意窗口内：取消正在进行的动画收起
+    // 指针进入本匣：若本匣面板可见，收起其他未固定面板，维持单一活动面板
+    // （否则「B 收起中、指针回到 A」的路径会让 A、B 同时显示）。
     if inside {
-        r.panel_hiding = false;
+        let visible = app
+            .state::<AppState>()
+            .pods
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map(|r| r.panel_visible)
+            .unwrap_or(false);
+        if visible {
+            dismiss_other_panels(app, id);
+        }
     }
 }
 
@@ -392,68 +455,39 @@ pub fn set_pod_accept(app: &AppHandle, id: u64, accepting: bool) {
     place_pod_bar(app, &pod, accepting);
 }
 
-/// 看门狗：逐个匣检查——面板未固定、未在拖出、列表模式且指针离开 -> 动画收起。
+/// 看门狗：逐个匣检查--面板未固定、未在拖出、列表模式且指针离开超过宽限期 -> 直接隐藏。
+/// 单一活动面板由 show_panel / report_presence 主动维持；这里只负责指针离开后的兜底收起。
 pub fn spawn_watchdog(app: AppHandle) {
     std::thread::spawn(move || {
-        let mut hide_requested_at: HashMap<u64, Instant> = HashMap::new();
         loop {
             std::thread::sleep(Duration::from_millis(100));
             let state = app.state::<AppState>();
             let ids: Vec<u64> = state.pods.lock().unwrap().keys().copied().collect();
             for id in ids {
-                let action: Option<bool> = {
-                    let mut guard = state.pods.lock().unwrap();
-                    let Some(r) = guard.get_mut(&id) else { continue };
-                    if !r.panel_visible {
-                        hide_requested_at.remove(&id);
-                        continue;
-                    }
-                    if r.panel_hiding {
-                        if hide_requested_at
-                            .get(&id)
-                            .map(|t| t.elapsed() > Duration::from_millis(1500))
-                            .unwrap_or(false)
-                        {
-                            Some(true) // 兜底强制隐藏
-                        } else {
-                            None
-                        }
-                    } else {
-                        let away = !r.panel_pinned
-                            && !r.dragging_out
-                            && r.mode == PanelMode::List
-                            && !r.bar_inside
-                            && !r.panel_inside
-                            && r.last_change
-                                .map(|t| t.elapsed() > Duration::from_millis(320))
-                                .unwrap_or(false);
-                        if away {
-                            r.panel_hiding = true;
-                            hide_requested_at.insert(id, Instant::now());
-                            Some(false) // 播收起动画
-                        } else {
-                            hide_requested_at.remove(&id);
-                            None
-                        }
-                    }
+                let should_hide = {
+                    let guard = state.pods.lock().unwrap();
+                    guard
+                        .get(&id)
+                        .map(|r| {
+                            r.panel_visible
+                                && !r.panel_pinned
+                                && !r.dragging_out
+                                && r.mode == PanelMode::List
+                                && !r.bar_inside
+                                && !r.panel_inside
+                                && r.last_change
+                                    .map(|t| t.elapsed() > Duration::from_millis(320))
+                                    .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
                 };
-                match action {
-                    Some(false) => {
-                        if let Some(panel) = pod_panel(&app, id) {
-                            let _ = panel.emit(events::PANEL_HIDE_REQUEST, ());
-                        }
-                    }
-                    Some(true) => {
-                        hide_panel(&app, id);
-                        hide_requested_at.remove(&id);
-                    }
-                    None => {}
+                if should_hide {
+                    hide_panel(&app, id);
                 }
             }
         }
     });
 }
-
 pub fn open_settings(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("settings") {
         let _ = w.show();

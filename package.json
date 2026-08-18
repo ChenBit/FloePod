@@ -1,7 +1,7 @@
 {
   "name": "floepod",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "浮匣 FloePod - 本地优先的屏幕边缘文件暂存工具",
   "type": "module",
   "scripts": {
