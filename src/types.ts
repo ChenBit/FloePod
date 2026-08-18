@@ -2,16 +2,40 @@
 
 export type ItemKind = "file" | "folder" | "text" | "shortcut";
 export type DropAction = "ask" | "copy" | "move" | "shortcut";
-export type BarForm = "strip" | "bookmark";
-export type Edge = "left" | "right";
+export type Edge = "top" | "right" | "bottom" | "left";
 export type Material = "acrylic" | "plain";
 export type ThemeMode = "system" | "light" | "dark";
 export type ExportMode = "copy" | "move";
 export type ConflictStrategy = "ask" | "overwrite" | "skip" | "rename";
 
+/** 一个「匣」：贴在屏幕边缘的独立暂存点 */
+export interface Pod {
+  id: number;
+  name: string;
+  edge: Edge;
+  /** 显示器名；空串 = 主显示器 */
+  monitor: string;
+  /** 沿边缘位置 0 - 1 */
+  offset: number;
+  /** 保存文件夹 */
+  stagingFolder: string;
+  opacity: number;
+  material: Material;
+  panelWidth: number;
+  hoverDelayMs: number;
+  dropAction: DropAction;
+  enabled: boolean;
+}
+
+export interface MonitorInfo {
+  name: string;
+  label: string;
+  primary: boolean;
+}
+
 export interface StagedItem {
   id: number;
-  sceneId: number;
+  podId: number;
   kind: ItemKind;
   /** 暂存文件夹内的绝对路径 */
   stagingPath: string;
@@ -24,13 +48,6 @@ export interface StagedItem {
   createdAt: number;
 }
 
-export interface Scene {
-  id: number;
-  name: string;
-  sort: number;
-  createdAt: number;
-}
-
 export interface Hotkeys {
   toggleBar: string;
   collectClipboard: string;
@@ -38,23 +55,12 @@ export interface Hotkeys {
 }
 
 export interface Settings {
-  stagingFolder: string | null;
-  /** 拖入动作：ask = 每次询问 */
-  dropAction: DropAction;
-  barForm: BarForm;
-  edge: Edge;
-  /** 0.55 - 1，条体不透明度 */
-  opacity: number;
-  material: Material;
-  /** 悬停展开延迟 ms */
-  hoverDelayMs: number;
-  /** 面板宽度 300 - 480 */
-  panelWidth: number;
   theme: ThemeMode;
-  autostart: boolean;
-  activeSceneId: number;
+  /** OOBE 是否完成 */
   firstRunDone: boolean;
+  autostart: boolean;
   hotkeys: Hotkeys;
+  pods: Pod[];
   /** 只读信息：应用版本与数据目录 */
   version: string;
   dataDir: string;
@@ -71,11 +77,6 @@ export interface PendingDrop {
   paths: string[];
 }
 
-export interface ExportConflict {
-  /** 与目标位置冲突的名字 */
-  names: string[];
-}
-
 export interface ThumbnailPayload {
   mime: string;
   /** 图像字节 */
@@ -84,10 +85,7 @@ export interface ThumbnailPayload {
 
 export interface Bootstrap {
   settings: Settings;
-  scenes: Scene[];
-  items: StagedItem[];
-  panelMode: PanelMode;
-  pendingDrop: PendingDrop | null;
+  monitors: MonitorInfo[];
   version: string;
 }
 

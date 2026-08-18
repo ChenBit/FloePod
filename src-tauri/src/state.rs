@@ -1,13 +1,15 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
 use notify::RecommendedWatcher;
 use rusqlite::Connection;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum PanelMode {
+    #[default]
     List,
     Ask,
     Conflict,
@@ -30,25 +32,33 @@ impl PanelMode {
     }
 }
 
+/// 单个「匣」的运行时状态（看门狗 / 面板显隐）。
 #[derive(Default)]
-pub struct Presence {
+pub struct PodRuntime {
     pub bar_inside: bool,
     pub panel_inside: bool,
+    pub panel_visible: bool,
+    pub panel_pinned: bool,
+    /// 看门狗已发出「动画收起」请求，等待前端播完动画后真正隐藏
+    pub panel_hiding: bool,
+    /// 面板正在向外拖出文件（OLE 拖拽进行中）
+    pub dragging_out: bool,
+    pub mode: PanelMode,
+    pub pending_drop: Vec<String>,
+    pub panel_height: u32,
     pub last_change: Option<Instant>,
 }
 
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub data_dir: PathBuf,
-    pub presence: Mutex<Presence>,
-    pub panel_visible: AtomicBool,
-    pub panel_pinned: AtomicBool,
-    pub panel_mode: Mutex<PanelMode>,
-    pub pending_drop: Mutex<Vec<String>>,
-    pub bar_hovering: AtomicBool,
-    pub panel_height: AtomicU32,
+    /// pod_id -> 运行时状态
+    pub pods: Mutex<HashMap<u64, PodRuntime>>,
     pub last_stage_ms: AtomicU64,
-    pub watcher: Mutex<Option<RecommendedWatcher>>,
+    /// 暂存文件夹监听的脏标记（有文件变化待对账）
+    pub watcher_dirty: AtomicBool,
+    /// pod_id -> 暂存文件夹监听器
+    pub watcher: Mutex<HashMap<u64, RecommendedWatcher>>,
 }
 
 impl AppState {
@@ -56,15 +66,10 @@ impl AppState {
         Self {
             db: Mutex::new(db),
             data_dir,
-            presence: Mutex::new(Presence::default()),
-            panel_visible: AtomicBool::new(false),
-            panel_pinned: AtomicBool::new(false),
-            panel_mode: Mutex::new(PanelMode::List),
-            pending_drop: Mutex::new(Vec::new()),
-            bar_hovering: AtomicBool::new(false),
-            panel_height: AtomicU32::new(420),
+            pods: Mutex::new(HashMap::new()),
             last_stage_ms: AtomicU64::new(0),
-            watcher: Mutex::new(None),
+            watcher_dirty: AtomicBool::new(false),
+            watcher: Mutex::new(HashMap::new()),
         }
     }
 
@@ -86,12 +91,5 @@ impl AppState {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         now.saturating_sub(last) < 3_000
-    }
-
-    pub fn set_mode(&self, mode: PanelMode) {
-        *self.panel_mode.lock().unwrap() = mode;
-        if mode == PanelMode::List {
-            self.pending_drop.lock().unwrap().clear();
-        }
     }
 }

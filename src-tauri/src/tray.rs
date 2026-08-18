@@ -1,12 +1,11 @@
-//! 托盘：常驻入口与场景快捷切换。
+//! 托盘：常驻入口与各「匣」的快捷入口。
 
-use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 use crate::events;
 use crate::manager;
-use crate::state::AppState;
 
 pub fn init(app: &AppHandle) -> tauri::Result<()> {
     let menu = build_menu(app)?;
@@ -27,7 +26,7 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
                 ..
             } = event
             {
-                manager::toggle_panel(tray.app_handle());
+                manager::open_settings(tray.app_handle());
             }
         })
         .build(app)?;
@@ -35,57 +34,32 @@ pub fn init(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let state = app.state::<AppState>();
-    let conn = state.db.lock().unwrap();
-    let settings = crate::settings::load(
-        &conn,
-        &state.data_dir.to_string_lossy(),
-        env!("CARGO_PKG_VERSION"),
-    )
-    .unwrap_or_default();
-    let scenes = db_scenes(&conn);
-    drop(conn);
+    let settings = manager::current_settings(app);
 
-    let open_panel = MenuItem::with_id(app, "open_panel", "打开暂存面板", true, None::<&str>)?;
     let open_settings = MenuItem::with_id(app, "open_settings", "设置", true, None::<&str>)?;
-    let open_folder = MenuItem::with_id(app, "open_folder", "打开暂存文件夹", true, None::<&str>)?;
     let collect = MenuItem::with_id(app, "collect_clipboard", "收集剪贴板文字", true, None::<&str>)?;
+    let toggle_bars = MenuItem::with_id(app, "toggle_bars", "显示 / 隐藏全部匣", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "退出浮匣", true, None::<&str>)?;
 
-    let mut sub = SubmenuBuilder::new(app, "场景");
-    for sc in &scenes {
-        let label = if sc.id == settings.active_scene_id {
-            format!("{} ✓", sc.name)
-        } else {
-            sc.name.clone()
-        };
-        sub = sub.item(&MenuItem::with_id(
+    let mut menu = MenuBuilder::new(app).item(&open_settings);
+    for pod in settings.pods.iter().filter(|p| p.enabled) {
+        menu = menu.item(&MenuItem::with_id(
             app,
-            format!("scene:{}", sc.id),
-            label,
+            format!("pod:{}", pod.id),
+            format!("打开「{}」", pod.name),
             true,
             None::<&str>,
         )?);
     }
-    let scenes_menu = sub.build()?;
-
-    MenuBuilder::new(app)
-        .item(&open_panel)
-        .item(&open_settings)
-        .item(&open_folder)
+    menu = menu
         .item(&collect)
+        .item(&toggle_bars)
         .separator()
-        .item(&scenes_menu)
-        .separator()
-        .item(&quit)
-        .build()
+        .item(&quit);
+    menu.build()
 }
 
-fn db_scenes(conn: &rusqlite::Connection) -> Vec<crate::db::Scene> {
-    crate::db::list_scenes(conn).unwrap_or_default()
-}
-
-pub fn refresh_scenes(app: &AppHandle) {
+pub fn refresh_menu(app: &AppHandle) {
     if let Some(tray) = app.tray_by_id("tray") {
         if let Ok(menu) = build_menu(app) {
             let _ = tray.set_menu(Some(menu));
@@ -95,37 +69,29 @@ pub fn refresh_scenes(app: &AppHandle) {
 
 fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
-        "open_panel" => manager::toggle_panel(app),
         "open_settings" => manager::open_settings(app),
-        "open_folder" => open_staging_folder(app),
+        "toggle_bars" => toggle_bars(app),
         "collect_clipboard" => {
             let _ = app.emit(events::COLLECT_CLIPBOARD, ());
         }
         "quit" => app.exit(0),
         id => {
-            if let Some(id_str) = id.strip_prefix("scene:") {
-                if let Ok(sid) = id_str.parse::<i64>() {
-                    let _ = crate::commands::set_active_scene_impl(app, sid);
+            if let Some(id_str) = id.strip_prefix("pod:") {
+                if let Ok(pid) = id_str.parse::<u64>() {
+                    manager::toggle_panel(app, pid);
                 }
             }
         }
     }
 }
 
-pub fn open_staging_folder(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let folder = {
-        let conn = state.db.lock().unwrap();
-        crate::settings::load(
-            &conn,
-            &state.data_dir.to_string_lossy(),
-            env!("CARGO_PKG_VERSION"),
-        )
-        .ok()
-        .and_then(|s| s.staging_folder)
-    };
-    if let Some(folder) = folder {
-        use tauri_plugin_opener::OpenerExt;
-        let _ = app.opener().open_path(folder, None::<&str>);
-    }
+pub fn toggle_bars(app: &AppHandle) {
+    let visible = manager::current_settings(app)
+        .pods
+        .iter()
+        .filter(|p| p.enabled)
+        .find_map(|p| manager::pod_bar(app, p.id))
+        .map(|b| b.is_visible().unwrap_or(false))
+        .unwrap_or(false);
+    manager::set_all_bars(app, !visible);
 }

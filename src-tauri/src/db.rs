@@ -21,18 +21,45 @@ pub fn open(dir: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+/// 0.4 迁移：删除「场景」，条目归属改为 pod_id（旧数据全部归入默认匣 1）。
 pub fn migrate(conn: &Connection) -> Result<(), String> {
+    let has_scenes: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='scenes'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(false);
+
+    let item_cols: Vec<String> = conn
+        .prepare("PRAGMA table_info(items)")
+        .map_err(|e| e.to_string())?
+        .query_map([], |r| r.get::<_, String>(1))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+
+    // 旧版（0.2/0.3）：scene_id -> pod_id，全部归入默认匣 1，并删除场景表
+    if has_scenes {
+        if item_cols.iter().any(|c| c == "scene_id") {
+            conn.execute_batch(
+                "DROP INDEX IF EXISTS idx_items_scene;
+                 ALTER TABLE items RENAME COLUMN scene_id TO pod_id;
+                 UPDATE items SET pod_id = 1;
+                 DROP TABLE IF EXISTS scenes;",
+            )
+            .map_err(|e| e.to_string())?;
+        } else {
+            conn.execute_batch("DROP TABLE IF EXISTS scenes;")
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
     conn.execute_batch(
         r#"
-        CREATE TABLE IF NOT EXISTS scenes (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          sort INTEGER NOT NULL DEFAULT 0,
-          created_at INTEGER NOT NULL
-        );
         CREATE TABLE IF NOT EXISTS items (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
-          scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+          pod_id INTEGER NOT NULL DEFAULT 1,
           kind TEXT NOT NULL,
           staging_path TEXT NOT NULL UNIQUE,
           original_path TEXT,
@@ -41,27 +68,14 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
           size INTEGER NOT NULL DEFAULT 0,
           created_at INTEGER NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_items_scene ON items(scene_id);
+        CREATE INDEX IF NOT EXISTS idx_items_pod ON items(pod_id);
         CREATE TABLE IF NOT EXISTS settings (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
         );
         "#,
     )
-    .map_err(|e| e.to_string())
-}
-
-pub fn ensure_default_scene(conn: &Connection) -> Result<(), String> {
-    let n: i64 = conn
-        .query_row("SELECT COUNT(*) FROM scenes", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-    if n == 0 {
-        conn.execute(
-            "INSERT INTO scenes (name, sort, created_at) VALUES (?1, 0, ?2)",
-            params!["默认", now_ms()],
-        )
-        .map_err(|e| e.to_string())?;
-    }
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -71,7 +85,7 @@ pub fn ensure_default_scene(conn: &Connection) -> Result<(), String> {
 #[serde(rename_all = "camelCase")]
 pub struct StagedItem {
     pub id: i64,
-    pub scene_id: i64,
+    pub pod_id: i64,
     pub kind: String,
     pub staging_path: String,
     pub original_path: Option<String>,
@@ -81,19 +95,10 @@ pub struct StagedItem {
     pub created_at: i64,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Scene {
-    pub id: i64,
-    pub name: String,
-    pub sort: i64,
-    pub created_at: i64,
-}
-
 fn item_from_row(row: &Row) -> rusqlite::Result<StagedItem> {
     Ok(StagedItem {
         id: row.get(0)?,
-        scene_id: row.get(1)?,
+        pod_id: row.get(1)?,
         kind: row.get(2)?,
         staging_path: row.get(3)?,
         original_path: row.get(4)?,
@@ -104,14 +109,17 @@ fn item_from_row(row: &Row) -> rusqlite::Result<StagedItem> {
     })
 }
 
+const ITEM_COLS: &str =
+    "id, pod_id, kind, staging_path, original_path, name, ext, size, created_at";
+
 /* ---------- items ---------- */
 
 pub fn insert_item(conn: &Connection, it: &StagedItem) -> Result<StagedItem, String> {
     conn.execute(
-        "INSERT OR IGNORE INTO items (scene_id, kind, staging_path, original_path, name, ext, size, created_at)
+        "INSERT OR IGNORE INTO items (pod_id, kind, staging_path, original_path, name, ext, size, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
-            it.scene_id,
+            it.pod_id,
             it.kind,
             it.staging_path,
             it.original_path,
@@ -127,8 +135,9 @@ pub fn insert_item(conn: &Connection, it: &StagedItem) -> Result<StagedItem, Str
 
 pub fn find_by_path(conn: &Connection, path: &str) -> Result<Option<StagedItem>, String> {
     conn.query_row(
-        "SELECT id, scene_id, kind, staging_path, original_path, name, ext, size, created_at
-         FROM items WHERE staging_path = ?1",
+        &format!(
+            "SELECT {ITEM_COLS} FROM items WHERE staging_path = ?1"
+        ),
         params![path],
         item_from_row,
     )
@@ -136,15 +145,29 @@ pub fn find_by_path(conn: &Connection, path: &str) -> Result<Option<StagedItem>,
     .map_err(|e| e.to_string())
 }
 
+#[allow(dead_code)]
 pub fn list_items(conn: &Connection) -> Result<Vec<StagedItem>, String> {
     let mut stmt = conn
-        .prepare(
-            "SELECT id, scene_id, kind, staging_path, original_path, name, ext, size, created_at
-             FROM items ORDER BY created_at DESC, id DESC",
-        )
+        .prepare(&format!(
+            "SELECT {ITEM_COLS} FROM items ORDER BY created_at DESC, id DESC"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([], item_from_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    Ok(rows)
+}
+
+pub fn items_of_pod(conn: &Connection, pod_id: i64) -> Result<Vec<StagedItem>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {ITEM_COLS} FROM items WHERE pod_id = ?1 ORDER BY created_at DESC, id DESC"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![pod_id], item_from_row)
         .map_err(|e| e.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())?;
@@ -156,8 +179,7 @@ pub fn items_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<StagedItem>, S
     for id in ids {
         let found: Option<StagedItem> = conn
             .query_row(
-                "SELECT id, scene_id, kind, staging_path, original_path, name, ext, size, created_at
-                 FROM items WHERE id = ?1",
+                &format!("SELECT {ITEM_COLS} FROM items WHERE id = ?1"),
                 params![id],
                 item_from_row,
             )
@@ -168,33 +190,6 @@ pub fn items_by_ids(conn: &Connection, ids: &[i64]) -> Result<Vec<StagedItem>, S
         }
     }
     Ok(out)
-}
-
-pub fn items_of_scene(conn: &Connection, scene_id: i64) -> Result<Vec<StagedItem>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, scene_id, kind, staging_path, original_path, name, ext, size, created_at
-             FROM items WHERE scene_id = ?1 ORDER BY created_at DESC, id DESC",
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![scene_id], item_from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
-pub fn all_staging_paths(conn: &Connection) -> Result<Vec<String>, String> {
-    let mut stmt = conn
-        .prepare("SELECT staging_path FROM items")
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |r| r.get::<_, String>(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
 }
 
 pub fn delete_items_by_ids(conn: &Connection, ids: &[i64]) -> Result<(), String> {
@@ -213,75 +208,11 @@ pub fn delete_items_by_paths(conn: &Connection, paths: &[String]) -> Result<(), 
     Ok(())
 }
 
-/* ---------- scenes ---------- */
-
-fn scene_from_row(row: &Row) -> rusqlite::Result<Scene> {
-    Ok(Scene {
-        id: row.get(0)?,
-        name: row.get(1)?,
-        sort: row.get(2)?,
-        created_at: row.get(3)?,
-    })
-}
-
-const SCENE_COLS: &str = "id, name, sort, created_at";
-
-pub fn list_scenes(conn: &Connection) -> Result<Vec<Scene>, String> {
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {SCENE_COLS} FROM scenes ORDER BY sort ASC, id ASC"
-        ))
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], scene_from_row)
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-    Ok(rows)
-}
-
-pub fn create_scene(conn: &Connection, name: &str) -> Result<Scene, String> {
-    let max_sort: i64 = conn
-        .query_row("SELECT COALESCE(MAX(sort), -1) FROM scenes", [], |r| r.get(0))
-        .map_err(|e| e.to_string())?;
-    conn.execute(
-        "INSERT INTO scenes (name, sort, created_at) VALUES (?1, ?2, ?3)",
-        params![name, max_sort + 1, now_ms()],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.query_row(
-        &format!(
-            "SELECT {SCENE_COLS} FROM scenes WHERE id = last_insert_rowid()"
-        ),
-        [],
-        scene_from_row,
-    )
-    .map_err(|e| e.to_string())
-}
-
-pub fn rename_scene(conn: &Connection, id: i64, name: &str) -> Result<(), String> {
-    conn.execute("UPDATE scenes SET name = ?2 WHERE id = ?1", params![id, name])
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-pub fn delete_scene(conn: &Connection, id: i64) -> Result<Vec<StagedItem>, String> {
-    let items = items_of_scene(conn, id)?;
-    conn.execute("DELETE FROM scenes WHERE id = ?1", params![id])
+pub fn delete_items_by_pod(conn: &Connection, pod_id: i64) -> Result<Vec<StagedItem>, String> {
+    let items = items_of_pod(conn, pod_id)?;
+    conn.execute("DELETE FROM items WHERE pod_id = ?1", params![pod_id])
         .map_err(|e| e.to_string())?;
     Ok(items)
-}
-
-pub fn first_scene_id(conn: &Connection) -> Result<Option<i64>, String> {
-    let id: Option<i64> = conn
-        .query_row(
-            "SELECT id FROM scenes ORDER BY sort ASC, id ASC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-        .map_err(|e| e.to_string())?;
-    Ok(id)
 }
 
 /* ---------- settings kv ---------- */
@@ -314,25 +245,28 @@ mod tests {
         let mut c = Connection::open_in_memory().unwrap();
         c.pragma_update(None, "foreign_keys", "ON").unwrap();
         migrate(&mut c).unwrap();
-        ensure_default_scene(&mut c).unwrap();
         c
     }
 
     #[test]
-    fn default_scene_created_once() {
+    fn fresh_db_has_no_scenes() {
         let c = conn();
-        let scenes = list_scenes(&c).unwrap();
-        assert_eq!(scenes.len(), 1);
-        assert_eq!(scenes[0].name, "默认");
+        let has_scenes: bool = c
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='scenes'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(!has_scenes);
     }
 
     #[test]
     fn insert_and_fetch_item() {
         let c = conn();
-        let scene = list_scenes(&c).unwrap().remove(0);
         let it = StagedItem {
             id: 0,
-            scene_id: scene.id,
+            pod_id: 1,
             kind: "file".into(),
             staging_path: "C:\\staging\\a.pdf".into(),
             original_path: Some("C:\\orig\\a.pdf".into()),
@@ -343,30 +277,39 @@ mod tests {
         };
         let saved = insert_item(&c, &it).unwrap();
         assert!(saved.id > 0);
-        assert_eq!(find_by_path(&c, "C:\\staging\\a.pdf").unwrap().unwrap().name, "a.pdf");
+        assert_eq!(items_of_pod(&c, 1).unwrap().len(), 1);
+        assert_eq!(
+            find_by_path(&c, "C:\\staging\\a.pdf").unwrap().unwrap().name,
+            "a.pdf"
+        );
     }
 
     #[test]
-    fn duplicate_path_ignored() {
-        let c = conn();
-        let scene_id = list_scenes(&c).unwrap()[0].id;
-        for _ in 0..2 {
-            let _ = insert_item(
-                &c,
-                &StagedItem {
-                    id: 0,
-                    scene_id,
-                    kind: "file".into(),
-                    staging_path: "C:\\dup.txt".into(),
-                    original_path: None,
-                    name: "dup.txt".into(),
-                    ext: Some("txt".into()),
-                    size: 1,
-                    created_at: now_ms(),
-                },
+    fn legacy_scene_db_migrates_to_pod() {
+        // 模拟 0.3 旧库
+        let mut c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            r#"
+            CREATE TABLE scenes (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, sort INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+            CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, scene_id INTEGER NOT NULL, kind TEXT NOT NULL, staging_path TEXT NOT NULL UNIQUE, original_path TEXT, name TEXT NOT NULL, ext TEXT, size INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+            CREATE INDEX idx_items_scene ON items(scene_id);
+            INSERT INTO scenes (id, name, sort, created_at) VALUES (1, '默认', 0, 1), (2, '工作', 1, 2);
+            INSERT INTO items (scene_id, kind, staging_path, original_path, name, ext, size, created_at)
+              VALUES (1,'file','C:\\s\\a.txt',NULL,'a.txt','txt',1,1), (2,'file','C:\\s\\b.pdf',NULL,'b.pdf','pdf',2,2);
+            "#,
+        )
+        .unwrap();
+        migrate(&mut c).unwrap();
+        let items = list_items(&c).unwrap();
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|i| i.pod_id == 1));
+        let has_scenes: bool = c
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='scenes'",
+                [],
+                |r| r.get(0),
             )
             .unwrap();
-        }
-        assert_eq!(list_items(&c).unwrap().len(), 1);
+        assert!(!has_scenes);
     }
 }

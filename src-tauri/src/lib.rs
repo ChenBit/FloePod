@@ -1,4 +1,4 @@
-//! 浮匣 FloePod - 本地优先的屏幕边缘文件暂存工具。
+//! 浮匣 FloePod - 本地优先的屏幕边缘文件暂存工具（多匣版）。
 
 mod commands;
 mod db;
@@ -24,9 +24,6 @@ pub fn run() {
         Ok(c) => c,
         Err(e) => panic!("无法打开数据库: {e}"),
     };
-    if let Err(e) = db::ensure_default_scene(&conn) {
-        panic!("初始化场景失败: {e}");
-    }
     let app_state = state::AppState::new(conn, data_dir.clone());
 
     tauri::Builder::default()
@@ -56,21 +53,24 @@ pub fn run() {
             };
 
             tray::init(app.handle())?;
+            watcher::spawn(app.handle().clone());
 
-            // 首启 / 未配置：引导设置；否则直接亮相
-            if settings.staging_folder.is_some() && settings.first_run_done {
-                if let Some(bar) = manager::bar_webview(app.handle()) {
-                    let _ = bar.show();
-                }
-            }
+            commands::debug_log(&format!(
+                "=== FloePod {VERSION} 启动 | 数据目录 {} | 匣 {} 个 | firstRunDone={} ===",
+                settings.data_dir,
+                settings.pods.len(),
+                settings.first_run_done
+            ));
 
+            // 落地：创建匣窗口 / 应用外观 / 自启 / 监听 / 托盘
             manager::apply_settings(app.handle(), &settings);
             if let Err(e) = hotkeys::register(app.handle(), &settings) {
                 eprintln!("[hotkeys] {e}");
             }
             manager::spawn_watchdog(app.handle().clone());
 
-            if settings.staging_folder.is_none() || !settings.first_run_done {
+            // 首启（OOBE）或还没有任何匣：打开设置引导
+            if !settings.first_run_done || settings.pods.is_empty() {
                 manager::open_settings(app.handle());
             }
             Ok(())
@@ -82,12 +82,16 @@ pub fn run() {
                         api.prevent_close();
                         let _ = window.hide();
                     }
-                    "bar" => {
+                    label if label.starts_with("pod_") => {
                         api.prevent_close();
-                    }
-                    "panel" => {
-                        api.prevent_close();
-                        manager::hide_panel(&window.app_handle());
+                        // 面板被请求关闭（如 Alt+F4）-> 收起该匣面板
+                        if let Some(id) = label
+                            .strip_prefix("pod_")
+                            .and_then(|s| s.strip_suffix("_panel"))
+                            .and_then(|s| s.parse::<u64>().ok())
+                        {
+                            manager::hide_panel(&window.app_handle(), id);
+                        }
                     }
                     _ => {}
                 }
@@ -95,30 +99,35 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_bootstrap,
+            commands::get_pod,
+            commands::get_monitors,
             commands::get_modifier_state,
             commands::get_hotkey_defaults,
+            commands::create_pod,
+            commands::update_pod,
+            commands::delete_pod,
+            commands::save_settings,
             commands::stage_paths,
             commands::stage_text,
-            commands::list_items,
+            commands::list_pod_items,
             commands::remove_items,
             commands::finalize_drag_cut,
             commands::export_items,
             commands::read_thumbnail,
-            commands::list_scenes,
-            commands::create_scene,
-            commands::rename_scene,
-            commands::delete_scene,
-            commands::set_active_scene,
-            commands::save_settings,
             commands::show_panel,
             commands::toggle_panel,
             commands::hide_panel,
             commands::set_panel_mode,
             commands::hold_pending_drop,
             commands::report_presence,
-            commands::set_bar_hover,
-            commands::open_settings,
+            commands::set_panel_pinned,
+            commands::set_dragging_out,
+            commands::set_pod_accept,
             commands::set_panel_size,
+            commands::toggle_all_bars,
+            commands::open_settings,
+            commands::log_frontend,
+            commands::app_log,
             commands::quit_app,
         ])
         .run(tauri::generate_context!())

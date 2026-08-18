@@ -3,7 +3,11 @@
 export const Events = {
   ItemsChanged: "floepod://items-changed",
   SettingsChanged: "floepod://settings-changed",
+  PodsChanged: "floepod://pods-changed",
   PanelMode: "floepod://panel-mode",
+  PanelShown: "floepod://panel-shown",
+  PanelPinned: "floepod://panel-pinned",
+  PanelHideRequest: "floepod://panel-hide-request",
   CollectClipboard: "floepod://collect-clipboard",
   OpenPanel: "floepod://open-panel",
 } as const;

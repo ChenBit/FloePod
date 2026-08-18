@@ -5,8 +5,9 @@ import type {
   ExportMode,
   Hotkeys,
   ModifierState,
+  MonitorInfo,
   PanelMode,
-  Scene,
+  Pod,
   Settings,
   StagedItem,
   ThumbnailPayload,
@@ -22,46 +23,53 @@ const inTauri = "__TAURI_INTERNALS__" in window;
 /** 浏览器开发模式的轻量 mock（无 Tauri 时保证 UI 可预览） */
 let mockItems: import("@/types").StagedItem[] = [];
 let mockSettings: import("@/types").Settings = {
-  stagingFolder: "D:\\浮匣暂存（浏览器预览）",
-  dropAction: "ask",
-  barForm: "strip",
-  edge: "left",
-  opacity: 0.85,
-  material: "acrylic",
-  hoverDelayMs: 120,
-  panelWidth: 380,
   theme: "system",
+  firstRunDone: false,
   autostart: false,
-  activeSceneId: 1,
-  firstRunDone: true,
   hotkeys: { toggleBar: "Alt+Shift+F", collectClipboard: "Alt+Shift+S", openPanel: "Alt+Shift+P" },
-  version: "0.2.0-mock",
+  pods: [
+    {
+      id: 1,
+      name: "我的匣",
+      edge: "left",
+      monitor: "",
+      offset: 0.5,
+      stagingFolder: "D:\\浮匣暂存（浏览器预览）",
+      opacity: 0.85,
+      material: "acrylic",
+      panelWidth: 380,
+      hoverDelayMs: 120,
+      dropAction: "ask",
+      enabled: true,
+    },
+  ],
+  version: "0.4.0-mock",
   dataDir: "浏览器预览",
 };
-let mockScenes: import("@/types").Scene[] = [
-  { id: 1, name: "默认", sort: 0, createdAt: 1 },
-  { id: 2, name: "工作素材", sort: 1, createdAt: 2 },
+const mockMonitors: MonitorInfo[] = [
+  { name: "\\\\.\\DISPLAY1", label: "主显示器", primary: true },
 ];
+
 if (!inTauri) {
   mockItems = [
     {
-      id: 1, sceneId: 1, kind: "file", stagingPath: "D:\\staging\\blueprint.webp",
+      id: 1, podId: 1, kind: "file", stagingPath: "D:\\staging\\blueprint.webp",
       originalPath: "C:\\src\\blueprint.webp", name: "蓝图参考.webp", ext: "webp", size: 245760, createdAt: Date.now() - 6e5,
     },
     {
-      id: 2, sceneId: 1, kind: "file", stagingPath: "D:\\staging\\需求说明.pdf",
+      id: 2, podId: 1, kind: "file", stagingPath: "D:\\staging\\需求说明.pdf",
       originalPath: null, name: "需求说明.pdf", ext: "pdf", size: 512000, createdAt: Date.now() - 18e5,
     },
     {
-      id: 3, sceneId: 1, kind: "text", stagingPath: "D:\\staging\\会议要点.txt",
+      id: 3, podId: 1, kind: "text", stagingPath: "D:\\staging\\会议要点.txt",
       originalPath: null, name: "会议要点.txt", ext: "txt", size: 2048, createdAt: Date.now() - 4e6,
     },
     {
-      id: 4, sceneId: 2, kind: "folder", stagingPath: "D:\\staging\\素材包",
+      id: 4, podId: 1, kind: "folder", stagingPath: "D:\\staging\\素材包",
       originalPath: "C:\\src\\素材包", name: "素材包", ext: null, size: 0, createdAt: Date.now() - 2e6,
     },
     {
-      id: 5, sceneId: 1, kind: "shortcut", stagingPath: "D:\\staging\\原型.fig - 快捷方式.lnk",
+      id: 5, podId: 1, kind: "shortcut", stagingPath: "D:\\staging\\原型.fig - 快捷方式.lnk",
       originalPath: "C:\\src\\原型.fig", name: "原型.fig - 快捷方式.lnk", ext: "lnk", size: 0, createdAt: Date.now() - 3e5,
     },
   ];
@@ -78,25 +86,55 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
   const ret = (v: unknown) => v as T;
   switch (cmd) {
     case "get_bootstrap":
-      return ret({
-        settings: mockSettings,
-        scenes: mockScenes,
-        items: mockItems,
-        panelMode: "list",
-        pendingDrop: null,
-        version: "0.2.0-mock",
-      });
-    case "list_items":
-      return ret(mockItems);
-    case "list_scenes":
-      return ret(mockScenes);
+      return ret({ settings: mockSettings, monitors: mockMonitors, version: "0.4.0-mock" });
+    case "get_pod":
+      return ret(mockSettings.pods.find((p) => p.id === Number(args?.podId)) ?? null);
+    case "get_monitors":
+      return ret(mockMonitors);
+    case "get_hotkey_defaults":
+      return ret(mockSettings.hotkeys);
+    case "list_pod_items":
+      return ret(mockItems.filter((i) => i.podId === Number(args?.podId)));
+    case "create_pod": {
+      const pod: Pod = {
+        id: mockSettings.pods.reduce((m, p) => Math.max(m, p.id), 0) + 1,
+        name: "新匣",
+        edge: "left",
+        monitor: "",
+        offset: 0.5,
+        stagingFolder: "",
+        opacity: 0.85,
+        material: "acrylic",
+        panelWidth: 380,
+        hoverDelayMs: 120,
+        dropAction: "ask",
+        enabled: true,
+        ...(args?.config as object),
+      };
+      mockSettings = { ...mockSettings, pods: [...mockSettings.pods, pod] };
+      return ret(pod);
+    }
+    case "update_pod": {
+      const id = Number(args?.podId);
+      const patch = (args?.patch as object) ?? {};
+      mockSettings = {
+        ...mockSettings,
+        pods: mockSettings.pods.map((p) => (p.id === id ? { ...p, ...patch } : p)),
+      };
+      return ret(mockSettings.pods.find((p) => p.id === id) ?? null);
+    }
+    case "delete_pod": {
+      const id = Number(args?.podId);
+      mockSettings = { ...mockSettings, pods: mockSettings.pods.filter((p) => p.id !== id) };
+      return ret(undefined);
+    }
     case "save_settings":
       mockSettings = { ...mockSettings, ...((args?.patch as object) ?? {}) };
       return ret(mockSettings);
     case "stage_text": {
       const content = String(args?.content ?? "");
       const item: import("@/types").StagedItem = {
-        id: Date.now(), sceneId: mockSettings.activeSceneId, kind: "text",
+        id: Date.now(), podId: Number(args?.podId) || 1, kind: "text",
         stagingPath: `D:\\staging\\文字 ${mockItems.length + 1}.txt`,
         originalPath: null, name: `文字 ${mockItems.length + 1}.txt`, ext: "txt",
         size: content.length, createdAt: Date.now(),
@@ -104,10 +142,6 @@ async function mockInvoke<T>(cmd: string, args?: Record<string, unknown>): Promi
       seed().push(item);
       return ret(item);
     }
-    case "create_scene":
-      return ret({ id: Date.now(), name: String(args?.name), sort: mockScenes.length, createdAt: Date.now() });
-    case "get_hotkey_defaults":
-      return ret(mockSettings.hotkeys);
     default:
       // 窗口类命令在浏览器里静默成功即可
       return ret(undefined);
@@ -118,19 +152,31 @@ export const ipc = {
   inTauri,
 
   getBootstrap: (): Promise<Bootstrap> => invoke("get_bootstrap"),
+  getPod: (podId: number): Promise<Pod | null> => invoke("get_pod", { podId }),
+  getMonitors: (): Promise<MonitorInfo[]> => invoke("get_monitors"),
+
+  // ---- 匣 CRUD ----
+  createPod: (config: Partial<Pod>): Promise<Pod> =>
+    invoke("create_pod", { config }),
+  updatePod: (podId: number, patch: Partial<Pod>): Promise<Pod | null> =>
+    invoke("update_pod", { podId, patch }),
+  deletePod: (podId: number, recycleFiles: boolean): Promise<void> =>
+    invoke("delete_pod", { podId, recycleFiles }),
 
   // ---- 拖入 ----
   getModifierState: (): Promise<ModifierState> => invoke("get_modifier_state"),
-  /** 拖入待询问：暂存路径并弹出面板 ask 模式 */
-  holdPendingDrop: (paths: string[]): Promise<void> =>
-    invoke("hold_pending_drop", { paths }),
+  /** 拖入待询问：暂存路径并弹出该匣面板 ask 模式 */
+  holdPendingDrop: (podId: number, paths: string[]): Promise<void> =>
+    invoke("hold_pending_drop", { podId, paths }),
   /** 确认动作后执行暂存 */
-  stagePaths: (paths: string[], action: DropAction): Promise<StagedItem[]> =>
-    invoke("stage_paths", { paths, action }),
-  stageText: (content: string): Promise<StagedItem> => invoke("stage_text", { content }),
+  stagePaths: (podId: number, paths: string[], action: DropAction): Promise<StagedItem[]> =>
+    invoke("stage_paths", { podId, paths, action }),
+  stageText: (podId: number, content: string): Promise<StagedItem> =>
+    invoke("stage_text", { podId, content }),
 
   // ---- 列表 ----
-  listItems: (): Promise<StagedItem[]> => invoke("list_items"),
+  listPodItems: (podId: number): Promise<StagedItem[]> =>
+    invoke("list_pod_items", { podId }),
   removeItems: (ids: number[], deleteFiles: boolean): Promise<void> =>
     invoke("remove_items", { ids, deleteFiles }),
 
@@ -146,30 +192,32 @@ export const ipc = {
   readThumbnail: (path: string): Promise<ThumbnailPayload | null> =>
     invoke("read_thumbnail", { path }),
 
-  // ---- 场景 ----
-  listScenes: (): Promise<Scene[]> => invoke("list_scenes"),
-  createScene: (name: string): Promise<Scene> => invoke("create_scene", { name }),
-  renameScene: (id: number, name: string): Promise<void> => invoke("rename_scene", { id, name }),
-  deleteScene: (id: number): Promise<void> => invoke("delete_scene", { id }),
-  setActiveScene: (id: number): Promise<void> => invoke("set_active_scene", { id }),
-
   // ---- 设置 ----
   saveSettings: (patch: Partial<Settings>): Promise<Settings> =>
     invoke("save_settings", { patch }),
   getHotkeyDefaults: (): Promise<Hotkeys> => invoke("get_hotkey_defaults"),
 
-  // ---- 窗口 ----
-  showPanel: (cursorY?: number): Promise<void> => invoke("show_panel", { cursorY }),
-  togglePanel: (): Promise<void> => invoke("toggle_panel"),
-  hidePanel: (): Promise<void> => invoke("hide_panel"),
-  setPanelMode: (mode: PanelMode): Promise<void> => invoke("set_panel_mode", { mode }),
-  reportPresence: (window: string, inside: boolean): Promise<void> =>
-    invoke("report_presence", { window, inside }),
-  setBarHover: (hovering: boolean): Promise<void> => invoke("set_bar_hover", { hovering }),
+  // ---- 窗口（按匣） ----
+  showPanel: (podId: number): Promise<void> => invoke("show_panel", { podId }),
+  togglePanel: (podId: number): Promise<void> => invoke("toggle_panel", { podId }),
+  hidePanel: (podId: number): Promise<void> => invoke("hide_panel", { podId }),
+  setPanelMode: (podId: number, mode: PanelMode): Promise<void> =>
+    invoke("set_panel_mode", { podId, mode }),
+  reportPresence: (podId: number, window: string, inside: boolean): Promise<void> =>
+    invoke("report_presence", { podId, window, inside }),
+  setPanelPinned: (podId: number, pinned: boolean): Promise<void> =>
+    invoke("set_panel_pinned", { podId, pinned }),
+  setDraggingOut: (podId: number, dragging: boolean): Promise<void> =>
+    invoke("set_dragging_out", { podId, dragging }),
+  setPodAccept: (podId: number, accepting: boolean): Promise<void> =>
+    invoke("set_pod_accept", { podId, accepting }),
+  toggleAllBars: (): Promise<void> => invoke("toggle_all_bars"),
   openSettings: (): Promise<void> => invoke("open_settings"),
+  logFrontend: (msg: string): Promise<void> => invoke("log_frontend", { msg }),
+  appLog: (msg: string): Promise<void> => invoke("app_log", { msg }),
   quitApp: (): Promise<void> => invoke("quit_app"),
-  setPanelSize: (width: number, height: number): Promise<void> =>
-    invoke("set_panel_size", { width, height }),
+  setPanelSize: (podId: number, width: number, height: number): Promise<void> =>
+    invoke("set_panel_size", { podId, width, height }),
 
   // ---- 拖出（tauri-plugin-drag 底层命令） ----
   startDragOut: async (

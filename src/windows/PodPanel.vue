@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * 暂存面板：列表 / 拖入询问 / 冲突解决 三种模式。
- * 不抢焦点显示（Rust 侧 SW_SHOWNOACTIVATE），悬停离开自动隐藏（Rust 看门狗）。
+ * 单个「匣」的弹出面板：列表 / 拖入询问 / 冲突解决 三种模式。
+ * 不抢焦点显示（Rust 侧 SW_SHOWNOACTIVATE），悬停离开自动收回（Rust 看门狗）。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ipc } from "@/lib/ipc";
@@ -9,14 +9,18 @@ import { Events, listen } from "@/lib/events";
 import { useSettingsStore } from "@/stores/settings";
 import { useStagingStore } from "@/stores/staging";
 import type { ConflictStrategy, DropAction, ExportMode, PanelMode, StagedItem } from "@/types";
-import SceneSwitcher from "@/components/SceneSwitcher.vue";
 import ItemRow from "@/components/ItemRow.vue";
 import ActionChooser from "@/components/ActionChooser.vue";
 import ConflictDialog from "@/components/ConflictDialog.vue";
 import SegmentedControl from "@/components/SegmentedControl.vue";
 
+const props = defineProps<{ podId: number }>();
+
 const settingsStore = useSettingsStore();
 const staging = useStagingStore();
+
+const pod = computed(() => settingsStore.pod(props.podId));
+const edge = computed(() => pod.value?.edge ?? "left");
 
 const mode = ref<PanelMode>("list");
 const pendingPaths = ref<string[]>([]);
@@ -27,7 +31,47 @@ const toast = ref("");
 let toastTimer: number | undefined;
 let anchorId: number | null = null;
 
-/* 冲突上下文（进入 conflict 模式时记录） */
+/* ---------- 固定 / 滑入滑出 ---------- */
+const pinned = ref(false);
+const rootEl = ref<HTMLElement | null>(null);
+let exitTimer: number | undefined;
+
+function slideDir(): string {
+  return edge.value;
+}
+
+function playSlideIn() {
+  const el = rootEl.value;
+  if (!el) return;
+  el.classList.remove("slide-in", ...slideDirs("in"));
+  void el.offsetWidth;
+  el.classList.add("slide-in", `slide-in-${slideDir()}`);
+}
+
+function slideDirs(kind: "in" | "out"): string[] {
+  const dirs = ["left", "right", "top", "bottom"];
+  return dirs.map((d) => (kind === "in" ? `slide-in-${d}` : `slide-out-${d}`));
+}
+
+function startExit() {
+  const el = rootEl.value;
+  if (!el) return;
+  cancelExit();
+  el.classList.add("slide-out", `slide-out-${slideDir()}`);
+  exitTimer = window.setTimeout(() => void ipc.hidePanel(props.podId), 200);
+}
+
+function cancelExit() {
+  window.clearTimeout(exitTimer);
+  exitTimer = undefined;
+  rootEl.value?.classList.remove("slide-out", ...slideDirs("out"));
+}
+
+function onTogglePinned() {
+  void ipc.setPanelPinned(props.podId, !pinned.value);
+}
+
+/* ---------- 冲突上下文 ---------- */
 const conflict = ref<{ names: string[]; ids: number[]; dest: string; mode: ExportMode } | null>(
   null,
 );
@@ -123,17 +167,20 @@ async function onDragOut(paths: string[]) {
   const icon = makeDragIcon(paths, first?.ext ?? null);
   const isCut = dragMode.value === "move";
   try {
+    await ipc.setDraggingOut(props.podId, true);
     await ipc.startDragOut(paths, icon, dragMode.value, (dropped) => {
       if (dropped && isCut) {
-        void ipc.finalizeDragCut(paths).then(() => staging.refresh());
+        void ipc.finalizeDragCut(paths).then(() => staging.refresh(props.podId));
       }
     });
   } catch (err) {
     console.error("drag out failed", err);
+  } finally {
+    await ipc.setDraggingOut(props.podId, false);
   }
 }
 
-/* ---------- 打开 / 显示 / 移除 ---------- */
+/* ---------- 打开 / 移除 ---------- */
 async function openItem(item: StagedItem) {
   const { openPath } = await import("@tauri-apps/plugin-opener");
   await openPath(item.stagingPath);
@@ -176,7 +223,7 @@ async function exportSelected(exportMode: ExportMode) {
       return;
     }
     if (exportMode === "move") staging.clearSelection();
-    await staging.refresh();
+    await staging.refresh(props.podId);
     showToast(exportMode === "move" ? `已移动 ${ids.length} 项` : `已复制 ${ids.length} 项`);
   } catch (err) {
     console.error(err);
@@ -192,7 +239,7 @@ async function resolveConflict(strategy: Exclude<ConflictStrategy, "ask">) {
   try {
     await ipc.exportItems(ctx.ids, ctx.dest, ctx.mode, strategy);
     if (ctx.mode === "move") staging.clearSelection();
-    await staging.refresh();
+    await staging.refresh(props.podId);
     showToast(ctx.mode === "move" ? "移动完成" : "复制完成");
   } catch {
     showToast("导出失败，请重试");
@@ -204,10 +251,12 @@ async function chooseAction(action: DropAction, remember: boolean) {
   const paths = pendingPaths.value;
   pendingPaths.value = [];
   mode.value = "list";
-  await ipc.setPanelMode("list");
-  if (remember) await settingsStore.save({ dropAction: action });
+  await ipc.setPanelMode(props.podId, "list");
+  if (remember && pod.value) {
+    await ipc.updatePod(props.podId, { dropAction: action });
+  }
   try {
-    await ipc.stagePaths(paths, action);
+    await ipc.stagePaths(props.podId, paths, action);
     const verb = action === "copy" ? "复制" : action === "move" ? "移动" : "快捷方式";
     showToast(`已暂存 ${paths.length} 项（${verb}）`);
   } catch (err) {
@@ -219,7 +268,7 @@ async function chooseAction(action: DropAction, remember: boolean) {
 async function cancelAsk() {
   pendingPaths.value = [];
   mode.value = "list";
-  await ipc.setPanelMode("list");
+  await ipc.setPanelMode(props.podId, "list");
 }
 
 /* ---------- 文字暂存 ---------- */
@@ -227,7 +276,7 @@ async function stashText() {
   const content = textValue.value.trim();
   if (!content) return;
   try {
-    await ipc.stageText(content);
+    await ipc.stageText(props.podId, content);
     textValue.value = "";
     textOpen.value = false;
     showToast("文字已暂存");
@@ -245,8 +294,8 @@ async function clearAll() {
     return;
   }
   confirmClear.value = false;
-  await staging.clearActiveScene(true);
-  showToast("已清空当前场景（文件进回收站）");
+  await staging.clearActivePod(true);
+  showToast("已清空（文件进回收站）");
 }
 
 /* ---------- 键盘 ---------- */
@@ -257,7 +306,7 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (e.key === "Escape") {
     if (selectedCount.value) staging.clearSelection();
-    else void ipc.hidePanel();
+    else void ipc.hidePanel(props.podId);
   } else if (e.ctrlKey && e.key.toLowerCase() === "a") {
     e.preventDefault();
     staging.selectAll();
@@ -276,65 +325,82 @@ watch(
     await nextTick();
     if (listEl.value && mode.value === "list") {
       const h = Math.min(listEl.value.scrollHeight, 560);
-      await ipc.setPanelSize(settingsStore.settings?.panelWidth ?? 380, h + 118).catch(() => {});
+      await ipc
+        .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, h + 118)
+        .catch(() => {});
     } else if (listEl.value) {
-      await ipc.setPanelSize(settingsStore.settings?.panelWidth ?? 380, listEl.value.scrollHeight + 16).catch(() => {});
+      await ipc
+        .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, listEl.value.scrollHeight + 16)
+        .catch(() => {});
     }
   },
 );
 
 onMounted(async () => {
   await settingsStore.load();
-  await staging.refresh();
-  staging.setActiveScene(settingsStore.settings?.activeSceneId ?? 0);
+  staging.setActivePod(props.podId);
+  await staging.refresh(props.podId);
   settingsStore.listenChanges();
-  staging.listenChanges();
+  staging.listenChanges(props.podId);
 
-  const boot = await ipc.getBootstrap();
-  mode.value = boot.panelMode;
-  pendingPaths.value = boot.pendingDrop?.paths ?? [];
-  dragMode.value = "copy";
+  mode.value = "list";
+  pendingPaths.value = [];
+  pinned.value = false;
 
   listen<{ mode: PanelMode; paths?: string[] }>(Events.PanelMode, (p) => {
     mode.value = p.mode;
     pendingPaths.value = p.paths ?? [];
   });
-  listen<never>(Events.SettingsChanged, () => {
-    staging.setActiveScene(settingsStore.settings?.activeSceneId ?? 0);
+  listen<never>(Events.SettingsChanged, () => {});
+
+  /* 面板每次出现都重播滑入动画 */
+  listen<never>(Events.PanelShown, () => {
+    cancelExit();
+    playSlideIn();
   });
+  /* 固定状态同步 */
+  listen<{ pinned: boolean }>(Events.PanelPinned, (p) => {
+    pinned.value = p.pinned;
+  });
+  /* 看门狗请求收起：先播滑出动画再隐藏 */
+  listen<never>(Events.PanelHideRequest, () => startExit());
 
   window.addEventListener("keydown", onKeydown);
 
   ro = new ResizeObserver(() => {
-    /* 高度变化时同步窗口尺寸 */
     if (listEl.value && mode.value === "list") {
       void ipc
-        .setPanelSize(settingsStore.settings?.panelWidth ?? 380, listEl.value.scrollHeight + 118)
+        .setPanelSize(props.podId, pod.value?.panelWidth ?? 380, listEl.value.scrollHeight + 118)
         .catch(() => {});
     }
   });
   if (listEl.value) ro.observe(listEl.value);
+
+  await nextTick();
+  playSlideIn();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onKeydown);
   ro?.disconnect();
   window.clearTimeout(toastTimer);
+  cancelExit();
 });
 
 function onPointerEnter() {
-  void ipc.reportPresence("panel", true);
+  cancelExit();
+  void ipc.reportPresence(props.podId, "panel", true);
 }
 function onPointerLeave() {
-  void ipc.reportPresence("panel", false);
+  void ipc.reportPresence(props.podId, "panel", false);
 }
 </script>
 
 <template>
-  <div class="panel-root" @pointerenter="onPointerEnter" @pointerleave="onPointerLeave">
+  <div ref="rootEl" class="panel-root" @pointerenter="onPointerEnter" @pointerleave="onPointerLeave">
     <!-- 头部 -->
     <header class="panel-head">
-      <SceneSwitcher :scenes="staging.scenes" :active-id="staging.activeSceneId" @changed="staging.refresh()" />
+      <div class="pod-name" :title="pod?.name">{{ pod?.name ?? "匣" }}</div>
       <div class="head-right">
         <button
           v-if="!textOpen"
@@ -345,6 +411,18 @@ function onPointerLeave() {
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
             <path d="M4 7h16M4 12h10M4 17h7" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          class="head-btn"
+          :class="{ on: pinned }"
+          :title="pinned ? '已固定，移开鼠标面板保持展开' : '固定面板（移开鼠标后保持展开）'"
+          @pointerdown="onTogglePinned"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 17v5" />
+            <path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1z" />
           </svg>
         </button>
         <button type="button" class="head-btn" title="设置" @pointerdown="ipc.openSettings()">
@@ -358,7 +436,6 @@ function onPointerLeave() {
 
     <!-- 主体 -->
     <div ref="listEl" class="panel-body">
-      <!-- 拖入询问 -->
       <ActionChooser
         v-if="mode === 'ask' && pendingPaths.length"
         :paths="pendingPaths"
@@ -366,7 +443,6 @@ function onPointerLeave() {
         @cancel="cancelAsk"
       />
 
-      <!-- 冲突解决 -->
       <ConflictDialog
         v-else-if="mode === 'conflict' && conflict"
         :names="conflict.names"
@@ -374,7 +450,6 @@ function onPointerLeave() {
         @resolve="resolveConflict"
       />
 
-      <!-- 文字暂存 -->
       <div v-else-if="textOpen" class="text-stash">
         <textarea
           v-model="textValue"
@@ -388,11 +463,10 @@ function onPointerLeave() {
         </div>
       </div>
 
-      <!-- 列表 -->
       <template v-else>
         <div v-if="items.length === 0" class="empty">
-          <div class="empty-title">暂存箱是空的</div>
-          <div class="empty-hint">把文件或图片拖到屏幕边缘的浮匣上<br />松手后会复制一份到这里</div>
+          <div class="empty-title">「{{ pod?.name ?? "匣" }}」是空的</div>
+          <div class="empty-hint">把文件或图片拖到屏幕边缘的这个匣上<br />松手后会复制一份到这里</div>
         </div>
         <TransitionGroup v-else name="list" tag="div" class="items">
           <ItemRow
@@ -455,24 +529,72 @@ function onPointerLeave() {
   display: flex;
   flex-direction: column;
   background: var(--glass);
-  /* 桌面级模糊由 Rust 侧 windowEffects(Acrylic) 提供；此处只做半透明着色 */
   border-radius: var(--radius-panel);
   box-shadow: inset 0 0 0 1px var(--glass-line);
   overflow: hidden;
-  animation: panel-in 260ms cubic-bezier(0.3, 1, 0.4, 1);
 }
-@keyframes panel-in {
-  from {
-    opacity: 0;
-    transform: scale(0.97) translateX(-6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+/* 滑入 / 滑出：方向由匣所在屏幕边缘决定 */
+.panel-root.slide-in {
+  animation-duration: 260ms;
+  animation-timing-function: cubic-bezier(0.3, 1, 0.4, 1);
+  animation-fill-mode: both;
+}
+.panel-root.slide-in-left {
+  animation-name: slide-in-left;
+}
+.panel-root.slide-in-right {
+  animation-name: slide-in-right;
+}
+.panel-root.slide-in-top {
+  animation-name: slide-in-top;
+}
+.panel-root.slide-in-bottom {
+  animation-name: slide-in-bottom;
+}
+.panel-root.slide-out {
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.4, 0, 1, 1);
+  animation-fill-mode: forwards;
+}
+.panel-root.slide-out-left {
+  animation-name: slide-out-left;
+}
+.panel-root.slide-out-right {
+  animation-name: slide-out-right;
+}
+.panel-root.slide-out-top {
+  animation-name: slide-out-top;
+}
+.panel-root.slide-out-bottom {
+  animation-name: slide-out-bottom;
+}
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-30px) scale(0.98); }
+}
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(30px) scale(0.98); }
+}
+@keyframes slide-in-top {
+  from { opacity: 0; transform: translateY(-30px) scale(0.98); }
+}
+@keyframes slide-in-bottom {
+  from { opacity: 0; transform: translateY(30px) scale(0.98); }
+}
+@keyframes slide-out-left {
+  to { opacity: 0; transform: translateX(-38px) scale(0.98); }
+}
+@keyframes slide-out-right {
+  to { opacity: 0; transform: translateX(38px) scale(0.98); }
+}
+@keyframes slide-out-top {
+  to { opacity: 0; transform: translateY(-38px) scale(0.98); }
+}
+@keyframes slide-out-bottom {
+  to { opacity: 0; transform: translateY(38px) scale(0.98); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .panel-root {
+  .panel-root.slide-in,
+  .panel-root.slide-out {
     animation: fade-only 150ms ease;
   }
   @keyframes fade-only {
@@ -486,6 +608,15 @@ function onPointerLeave() {
   justify-content: space-between;
   padding: 10px 12px 6px;
   flex-shrink: 0;
+}
+.pod-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
 }
 .head-right {
   display: flex;
@@ -507,6 +638,9 @@ function onPointerLeave() {
 .head-btn:hover {
   background: var(--surface-2);
   color: var(--ink);
+}
+.head-btn.on {
+  color: var(--accent);
 }
 
 .panel-body {

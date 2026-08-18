@@ -7,26 +7,26 @@
  */
 
 :root {
-  /* 冰蓝强调色（唯一强调色） */
-  --accent: oklch(0.55 0.09 224);
-  --accent-hover: oklch(0.49 0.09 224);
-  --accent-soft: oklch(0.55 0.09 224 / 0.14);
-  --on-accent: oklch(0.99 0.005 224);
+  /* 强调色 */
+  --accent: #0098ff;
+  --accent-hover: #007fd9;
+  --accent-soft: rgb(0 152 255 / 0.14);
+  --on-accent: #ffffff;
 
   /* 中性冷灰 */
   --ink: oklch(0.24 0.012 230);
   --ink-2: oklch(0.45 0.012 230);
   --ink-3: oklch(0.62 0.01 230);
-  --surface: oklch(0.985 0.003 230);
-  --surface-2: oklch(0.955 0.004 230);
-  --surface-3: oklch(0.925 0.005 230);
+  --surface: #eef3f8;
+  --surface-2: #bfc1c4;
+  --surface-3: #ccd0d5;
   --line: oklch(0.89 0.006 230);
   --line-strong: oklch(0.82 0.008 230);
   --danger: oklch(0.55 0.19 25);
 
   /* 窗口玻璃层（半透明窗口用）：着色要克制，模糊交给系统亚克力 */
-  --glass: oklch(0.985 0.003 230 / 0.6);
-  --glass-strong: oklch(0.985 0.003 230 / 0.8);
+  --glass: rgb(238 243 248 / 0.6);
+  --glass-strong: rgb(238 243 248 / 0.85);
   --glass-line: oklch(1 0 0 / 0.55);
   --glass-inner: oklch(1 0 0 / 0.5);
 

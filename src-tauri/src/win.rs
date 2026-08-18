@@ -7,7 +7,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     SetWindowPos, ShowWindow, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE,
-    SW_SHOWNOACTIVATE,
+    SW_HIDE, SW_SHOWNOACTIVATE,
 };
 
 fn key_down(vk: u16) -> bool {
@@ -46,5 +46,15 @@ pub fn show_no_activate(hwnd: isize) {
             0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE,
         );
+    }
+}
+
+/// 直接隐藏窗口。
+/// 不能走 Tauri 的 `hide()`：它对 WebView2 调用 `SetIsVisible(false)`，
+/// 会让顶层窗口重新显示（窗口可见但内容区占位），导致面板"收起后仍在屏幕上"。
+pub fn hide_window(hwnd: isize) {
+    let hwnd = hwnd as *mut c_void;
+    unsafe {
+        ShowWindow(hwnd, SW_HIDE);
     }
 }
