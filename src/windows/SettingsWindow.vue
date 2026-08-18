@@ -271,7 +271,7 @@ async function winClose() {
 
 onMounted(async () => {
   await settingsStore.load();
-  settingsStore.listenChanges();
+  void settingsStore.listenChanges();
   appLog(
     `SettingsWindow mounted | firstRun=${firstRun.value} | pods=${s.value?.pods.length ?? 0} | firstRunDone=${s.value?.firstRunDone}`,
   );
@@ -635,6 +635,7 @@ const PAGES = [
   justify-content: space-between;
   padding-left: 14px;
   background: var(--surface-raised);
+  border-bottom: 1px solid var(--line);
   user-select: none;
 }
 .titlebar-title {
@@ -665,7 +666,7 @@ const PAGES = [
 }
 .tb-btn.close:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-danger);
 }
 
 /* ---------- OOBE ---------- */
@@ -917,6 +918,7 @@ const PAGES = [
 }
 .input:focus {
   border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 .input.mono {
   flex: 1;
@@ -960,6 +962,7 @@ select.input {
   border-radius: 12px;
   background: var(--surface-raised);
   padding: 16px 18px;
+  box-shadow: 0 8px 24px -22px rgb(0 0 0 / 0.55);
 }
 .pod-card.off {
   opacity: 0.6;

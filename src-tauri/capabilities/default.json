@@ -8,6 +8,8 @@
     "core:window:allow-start-dragging",
     "core:window:allow-hide",
     "core:window:allow-minimize",
+    "core:window:allow-set-theme",
+    "core:window:allow-theme",
     "dialog:allow-open",
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",

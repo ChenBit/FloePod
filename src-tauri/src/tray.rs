@@ -72,7 +72,13 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
         "open_settings" => manager::open_settings(app),
         "toggle_bars" => toggle_bars(app),
         "collect_clipboard" => {
-            let _ = app.emit(events::COLLECT_CLIPBOARD, ());
+            if let Some(id) = crate::hotkeys::collect_into_first_pod(app) {
+                let _ = app.emit_to(
+                    format!("pod_{id}"),
+                    events::COLLECT_CLIPBOARD,
+                    serde_json::json!({ "podId": id }),
+                );
+            }
         }
         "quit" => app.exit(0),
         id => {

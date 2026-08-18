@@ -76,7 +76,7 @@ fn sanitize_text_name(raw: &str) -> String {
     let bad = ['<', '>', ':', '"', '/', '\\', '|', '?', '*'];
     let cleaned: String = raw
         .chars()
-        .take(18)
+        .take(48)
         .map(|c| if bad.contains(&c) || c.is_control() { ' ' } else { c })
         .collect();
     let trimmed = cleaned.trim();
@@ -85,6 +85,19 @@ fn sanitize_text_name(raw: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn text_file_base(title: Option<&str>, content: &str) -> String {
+    let raw = title
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| content.lines().next().unwrap_or("文字"));
+    let without_ext = if raw.to_ascii_lowercase().ends_with(".txt") {
+        &raw[..raw.len().saturating_sub(4)]
+    } else {
+        raw
+    };
+    sanitize_text_name(without_ext)
 }
 
 fn pod_of_conn(conn: &rusqlite::Connection, state: &AppState, id: u64) -> Result<Pod, String> {
@@ -340,7 +353,6 @@ pub async fn delete_pod(app: AppHandle, pod_id: u64, recycle_files: bool) -> Res
     drop(state);
     manager::apply_settings(&app, &manager::current_settings(&app));
     let _ = app.emit(events::PODS_CHANGED, ());
-    let _ = app.emit(events::ITEMS_CHANGED, ());
     Ok(())
 }
 
@@ -488,7 +500,12 @@ pub fn stage_paths(
 }
 
 #[tauri::command]
-pub fn stage_text(app: AppHandle, pod_id: u64, content: String) -> Result<StagedItem, String> {
+pub fn stage_text(
+    app: AppHandle,
+    pod_id: u64,
+    content: String,
+    title: Option<String>,
+) -> Result<StagedItem, String> {
     if content.trim().is_empty() {
         return Err("内容为空".into());
     }
@@ -497,7 +514,7 @@ pub fn stage_text(app: AppHandle, pod_id: u64, content: String) -> Result<Staged
     let pod = pod_of_conn(&conn, &state, pod_id)?;
     let dir = staging_dir(&pod)?;
 
-    let base = sanitize_text_name(content.lines().next().unwrap_or("文字"));
+    let base = text_file_base(title.as_deref(), &content);
     let mut used = HashSet::new();
     let target = unique_target(&dir, &format!("{base}.txt"), &mut used);
     let size = content.len() as i64;
@@ -715,11 +732,15 @@ pub fn read_thumbnail(app: AppHandle, path: String) -> Result<Option<ThumbnailPa
 
 fn emit_items_changed(app: &AppHandle, pod_id: u64) {
     let payload = serde_json::json!({ "podId": pod_id });
-    if let Some(panel) = manager::pod_panel(app, pod_id) {
-        let _ = panel.emit(events::ITEMS_CHANGED, payload.clone());
+    if manager::pod_panel(app, pod_id).is_some() {
+        let _ = app.emit_to(
+            format!("pod_{pod_id}_panel"),
+            events::ITEMS_CHANGED,
+            payload.clone(),
+        );
     }
-    if let Some(bar) = manager::pod_bar(app, pod_id) {
-        let _ = bar.emit(events::ITEMS_CHANGED, payload);
+    if manager::pod_bar(app, pod_id).is_some() {
+        let _ = app.emit_to(format!("pod_{pod_id}"), events::ITEMS_CHANGED, payload);
     }
 }
 
@@ -889,8 +910,15 @@ mod tests {
         assert_eq!(sanitize_text_name("héllo world"), "héllo world");
         assert_eq!(sanitize_text_name("a<b>c:d"), "a b c d");
         assert_eq!(sanitize_text_name("   "), "文字");
-        let long: String = std::iter::repeat('字').take(50).collect();
-        assert_eq!(sanitize_text_name(&long).chars().count(), 18);
+        let long: String = std::iter::repeat('字').take(80).collect();
+        assert_eq!(sanitize_text_name(&long).chars().count(), 48);
+    }
+
+    #[test]
+    fn text_title_is_optional_and_txt_suffix_is_not_duplicated() {
+        assert_eq!(text_file_base(Some("实验记录"), "正文"), "实验记录");
+        assert_eq!(text_file_base(Some("实验记录.txt"), "正文"), "实验记录");
+        assert_eq!(text_file_base(Some("  "), "第一行\n第二行"), "第一行");
     }
 
     #[test]

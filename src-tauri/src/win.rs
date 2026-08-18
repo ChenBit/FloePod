@@ -75,3 +75,21 @@ pub fn disable_rounding(hwnd: isize) {
         );
     }
 }
+
+/// 请求 Windows 11 使用系统圆角（DWMWCP_ROUND）。
+/// 面板窗口：CSS 负责裁切 WebView 内容，这里让原生窗口的
+/// 阴影/亚克力背景与同一圆角轮廓对齐；旧版 Windows 会忽略不支持的属性。
+pub fn prefer_rounded_corners(hwnd: isize) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    unsafe {
+        let pref: i32 = DWMWCP_ROUND;
+        DwmSetWindowAttribute(
+            hwnd as *mut c_void,
+            DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+            &pref as *const i32 as *const c_void,
+            std::mem::size_of::<i32>() as u32,
+        );
+    }
+}
