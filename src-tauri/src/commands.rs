@@ -60,6 +60,16 @@ pub fn unique_target(dir: &Path, desired: &str, used: &mut HashSet<String>) -> P
 }
 
 fn copy_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    // 安全检查：防止目标位于源目录内部导致无限递归复制
+    let src_canonical = src.canonicalize().unwrap_or_else(|_| src.to_path_buf());
+    let dst_canonical = dst.canonicalize().unwrap_or_else(|_| dst.to_path_buf());
+    if dst_canonical.starts_with(&src_canonical) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "目标不能位于源目录内部",
+        ));
+    }
+
     if src.is_dir() {
         fs::create_dir_all(dst)?;
         for entry in fs::read_dir(src)? {
@@ -456,10 +466,14 @@ pub fn stage_paths(
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "未命名".into());
                 let target = unique_target(&dir, &name, &mut used);
+
+                // 在移动前先判断源类型（移动后源路径可能不存在）
+                let is_dir_before_move = src.is_dir();
+
                 if act == "move" {
                     let moved = fs::rename(src, &target).or_else(|_| {
                         copy_all(src, &target)?;
-                        if src.is_dir() {
+                        if is_dir_before_move {
                             fs::remove_dir_all(src)
                         } else {
                             fs::remove_file(src)
@@ -469,8 +483,8 @@ pub fn stage_paths(
                 } else {
                     copy_all(src, &target).map_err(|e| format!("复制 {} 失败: {e}", name))?;
                 }
-                let size = if src.is_dir() { 0 } else { fs::metadata(&target).map(|m| m.len() as i64).unwrap_or(0) };
-                let kind = if src.is_dir() { "folder" } else { "file" };
+                let size = if is_dir_before_move { 0 } else { fs::metadata(&target).map(|m| m.len() as i64).unwrap_or(0) };
+                let kind = if is_dir_before_move { "folder" } else { "file" };
                 created.push(db::insert_item(
                     &conn,
                     &StagedItem {
@@ -581,17 +595,37 @@ pub fn finalize_drag_cut(app: AppHandle, paths: Vec<String>) -> Result<(), Strin
     let state = app.state::<AppState>();
     let pod_ids: Vec<i64> = {
         let conn = state.db.lock().unwrap();
-        let affected: HashSet<i64> = paths
-            .iter()
-            .filter_map(|p| db::find_by_path(&conn, p).ok().flatten())
-            .map(|i| i.pod_id)
-            .collect();
+        let settings = load_settings_conn(&conn, &state)?;
+
+        // 安全检查：验证所有路径都属于某个匣的暂存目录
+        let mut affected: HashSet<i64> = HashSet::new();
         for p in &paths {
             let path = Path::new(p);
-            if path.exists() {
-                let _ = trash::delete(path);
+            let path_canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+            // 查找该路径属于哪个匣
+            let mut found_pod = None;
+            for pod in &settings.pods {
+                if !pod.enabled || pod.staging_folder.is_empty() {
+                    continue;
+                }
+                let staging_dir = PathBuf::from(&pod.staging_folder);
+                let staging_canonical = staging_dir.canonicalize().unwrap_or_else(|_| staging_dir.clone());
+                if path_canonical.starts_with(&staging_canonical) {
+                    found_pod = Some(pod.id);
+                    break;
+                }
+            }
+
+            // 只处理属于暂存目录的路径
+            if let Some(pod_id) = found_pod {
+                affected.insert(pod_id as i64);
+                if path.exists() {
+                    let _ = trash::delete(path);
+                }
             }
         }
+
         db::delete_items_by_paths(&conn, &paths)?;
         affected.into_iter().collect()
     };
@@ -631,6 +665,8 @@ pub fn export_items(
     }
 
     let mut used: HashSet<String> = HashSet::new();
+    let mut exported_ids: Vec<i64> = Vec::new(); // 记录实际导出的条目ID
+
     for it in &items {
         let src = Path::new(&it.staging_path);
         if !src.exists() {
@@ -640,21 +676,24 @@ pub fn export_items(
             "overwrite" => dest.join(&it.name),
             "skip" => {
                 if dest.join(&it.name).exists() {
-                    continue;
+                    continue; // 跳过冲突文件，不记录到 exported_ids
                 }
                 dest.join(&it.name)
             }
             _ => unique_target(&dest, &it.name, &mut used),
         };
         copy_all(src, &target).map_err(|e| format!("导出 {} 失败: {e}", it.name))?;
+        exported_ids.push(it.id); // 只记录成功导出的条目
+
         if mode == "move" {
             let _ = trash::delete(src);
         }
     }
 
     let pod_ids: Vec<i64> = items.iter().map(|i| i.pod_id).collect::<HashSet<_>>().into_iter().collect();
-    if mode == "move" {
-        db::delete_items_by_ids(&conn, &ids)?;
+    if mode == "move" && !exported_ids.is_empty() {
+        // 只删除实际导出的条目，而不是全部请求的 ids
+        db::delete_items_by_ids(&conn, &exported_ids)?;
     }
     drop(conn);
     state.mark_staged();
@@ -779,10 +818,10 @@ pub fn hold_pending_drop(app: AppHandle, pod_id: u64, paths: Vec<String>) {
     {
         let state = app.state::<AppState>();
         let mut guard = state.pods.lock().unwrap();
-        if let Some(r) = guard.get_mut(&pod_id) {
-            r.pending_drop = paths;
-            r.mode = PanelMode::Ask;
-        }
+        // 使用 entry().or_default() 确保首次拖入时也能创建运行态
+        let r = guard.entry(pod_id).or_default();
+        r.pending_drop = paths;
+        r.mode = PanelMode::Ask;
     }
     manager::show_panel(&app, pod_id);
     manager::emit_panel_mode(&app, pod_id);
@@ -817,6 +856,8 @@ pub fn set_panel_size(app: AppHandle, pod_id: u64, _width: u32, height: u32) {
         if let Some(panel) = manager::pod_panel(&app, pod_id) {
             let scale = panel.scale_factor().unwrap_or(1.0);
             let w = (pod.panel_width as f64 * scale).round() as u32;
+            // 前端上报的是逻辑像素高度，需要乘以scale转为物理像素
+            // 但只乘一次，存入运行态后place_panel不再重复缩放
             let h = ((height as f64 * scale).round() as u32).clamp(160, 900);
             let resize_now = {
                 let mut guard = state.pods.lock().unwrap();

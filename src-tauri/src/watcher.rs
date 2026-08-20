@@ -22,11 +22,15 @@ pub fn spawn(app: AppHandle) {
             continue;
         }
         if state.staged_recently() {
+            // 3秒抑制期内不执行对账，但需要恢复脏标记以便后续重试
+            state.watcher_dirty.store(true, Ordering::Relaxed);
             continue;
         }
         drop(state);
         if let Err(e) = reconcile_all(&app) {
             eprintln!("[watcher] 对账失败: {e}");
+            // 对账失败后恢复脏标记，以便下次重试
+            app.state::<AppState>().watcher_dirty.store(true, Ordering::Relaxed);
         }
     });
 }
@@ -89,38 +93,46 @@ fn reconcile_all(app: &AppHandle) -> Result<(), String> {
             .collect();
 
         // 磁盘上有、库里没有 -> 入库
-        if let Ok(entries) = std::fs::read_dir(&folder) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let ps = path.to_string_lossy().to_string();
-                if known.remove(&ps) {
-                    continue;
+        // 注意：read_dir失败时不清除known，防止误删数据库记录
+        match std::fs::read_dir(&folder) {
+            Ok(entries) => {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    let ps = path.to_string_lossy().to_string();
+                    if known.remove(&ps) {
+                        continue;
+                    }
+                    let meta = entry.metadata().ok();
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    let ext = crate::commands::ext_of(&name);
+                    let kind = if path.is_dir() {
+                        "folder"
+                    } else if ext.as_deref() == Some("lnk") {
+                        "shortcut"
+                    } else {
+                        "file"
+                    };
+                    let _ = crate::db::insert_item(
+                        &conn,
+                        &StagedItem {
+                            id: 0,
+                            pod_id: pod_id as i64,
+                            kind: kind.into(),
+                            staging_path: ps,
+                            original_path: None,
+                            name,
+                            ext,
+                            size: meta.map(|m| m.len() as i64).unwrap_or(0),
+                            created_at: crate::db::now_ms(),
+                        },
+                    );
+                    changed = true;
                 }
-                let meta = entry.metadata().ok();
-                let name = entry.file_name().to_string_lossy().to_string();
-                let ext = crate::commands::ext_of(&name);
-                let kind = if path.is_dir() {
-                    "folder"
-                } else if ext.as_deref() == Some("lnk") {
-                    "shortcut"
-                } else {
-                    "file"
-                };
-                let _ = crate::db::insert_item(
-                    &conn,
-                    &StagedItem {
-                        id: 0,
-                        pod_id: pod_id as i64,
-                        kind: kind.into(),
-                        staging_path: ps,
-                        original_path: None,
-                        name,
-                        ext,
-                        size: meta.map(|m| m.len() as i64).unwrap_or(0),
-                        created_at: crate::db::now_ms(),
-                    },
-                );
-                changed = true;
+            }
+            Err(e) => {
+                eprintln!("[watcher] 读取目录失败 {}: {e}", folder.display());
+                // read_dir失败时跳过该匣的对账，不清除数据库记录
+                continue;
             }
         }
 

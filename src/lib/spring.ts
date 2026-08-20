@@ -55,6 +55,7 @@ export function springValue(
       v = 0;
       onUpdate(x);
       done = true;
+      raf = 0; // 重置 raf，允许后续 setTarget 重新启动动画
       onComplete?.();
       return;
     }

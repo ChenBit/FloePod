@@ -55,6 +55,8 @@ function onPointerLeave() {
 }
 
 function onClick() {
+  // 点击时取消挂起的hover定时器，防止旧定时器重新打开刚关闭的面板
+  window.clearTimeout(hoverTimeout);
   void ipc.togglePanel(props.podId);
 }
 

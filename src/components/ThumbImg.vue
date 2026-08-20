@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 图片缩略图：走 Rust 命令读取字节（仅限暂存文件夹内的图片），非图片回落为图形 */
-import { onMounted, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { ipc } from "@/lib/ipc";
 import type { ItemKind } from "@/types";
 import FileGlyph from "./FileGlyph.vue";
@@ -18,7 +18,11 @@ const failed = ref(false);
 const IMAGE_EXTS = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico"];
 
 async function load() {
-  url.value = null;
+  // 释放旧的 Object URL，防止内存泄漏
+  if (url.value) {
+    URL.revokeObjectURL(url.value);
+    url.value = null;
+  }
   failed.value = false;
   if (!IMAGE_EXTS.includes((props.ext ?? "").toLowerCase())) return;
   try {
@@ -36,6 +40,13 @@ async function load() {
 
 onMounted(load);
 watch(() => props.path, load);
+
+onBeforeUnmount(() => {
+  // 组件卸载时释放 Object URL
+  if (url.value) {
+    URL.revokeObjectURL(url.value);
+  }
+});
 </script>
 
 <template>

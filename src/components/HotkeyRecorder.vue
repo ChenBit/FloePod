@@ -28,6 +28,7 @@ function toCombo(e: KeyboardEvent): string | null {
   if (e.ctrlKey) mods.push("Ctrl");
   if (e.altKey) mods.push("Alt");
   if (e.shiftKey) mods.push("Shift");
+  if (e.metaKey) mods.push("Meta"); // 添加Win/Meta键支持
   return [...mods, KEY_LABELS[main] ?? main].join("+");
 }
 

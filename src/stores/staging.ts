@@ -34,6 +34,16 @@ export const useStagingStore = defineStore("staging", {
       if (!pid) return;
       const items = await ipc.listPodItems(pid);
       this.items = items;
+      
+      // 清理已不存在的选中ID，防止幽灵选择
+      const currentIds = new Set(items.map((i) => i.id));
+      const newSelectedIds = new Set<number>();
+      this.selectedIds.forEach((id) => {
+        if (currentIds.has(id)) {
+          newSelectedIds.add(id);
+        }
+      });
+      this.selectedIds = newSelectedIds;
     },
 
     toggleSelected(id: number, additive: boolean) {

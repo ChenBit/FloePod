@@ -214,6 +214,8 @@ async function exportSelected(exportMode: ExportMode) {
     if (names.length > 0) {
       conflict.value = { names, ids, dest, mode: exportMode };
       mode.value = "conflict";
+      // 同步冲突模式到Rust，防止看门狗或其他逻辑意外关闭面板
+      await ipc.setPanelMode(props.podId, "conflict");
       return;
     }
     if (exportMode === "move") staging.clearSelection();

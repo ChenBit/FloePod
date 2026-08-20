@@ -133,6 +133,8 @@ fn place_panel(app: &AppHandle, pod: &Pod) {
     let state = app.state::<AppState>();
     // panel_height 为 0（前端尚未上报）时用默认值：否则会按最小高度显示，
     // 待前端上报后再 resize，造成「显示后跳一下」的闪烁。
+    // 注意：panel_height 已经是物理像素（在 set_panel_size 中已乘以 scale），
+    // 这里不再重复缩放，避免高 DPI 下双重缩放导致 panic。
     let ph = {
         let guard = state.pods.lock().unwrap();
         guard
@@ -143,7 +145,8 @@ fn place_panel(app: &AppHandle, pod: &Pod) {
     };
     let scale = panel.scale_factor().unwrap_or(1.0);
     let pw = (pod.panel_width as f64 * scale).round() as i32;
-    let ph = (ph as f64 * scale).round() as i32;
+    // ph 已经是物理像素，直接使用
+    let ph = ph as i32;
 
     let Some((mx, my, mw, mh)) = monitor(app, pod) else { return };
     let (bx, by, bw, bh) = bar_geometry(app, pod, false).unwrap_or((mx, my, POD_BAR_SHORT, POD_BAR_LONG));
@@ -154,8 +157,13 @@ fn place_panel(app: &AppHandle, pod: &Pod) {
         "top" => (bx + bw / 2 - pw / 2, by + bh + PANEL_GAP),
         _ => (bx + bw + PANEL_GAP, by + bh / 2 - ph / 2),
     };
-    let x = x.clamp(mx + 8, mx + mw - pw - 8).max(mx);
-    let y = y.clamp(my + 8, my + mh - ph - 8).max(my);
+    // 安全 clamp：确保 min <= max，避免 panic
+    let x_min = mx + 8;
+    let x_max = (mx + mw - pw - 8).max(x_min);
+    let x = x.clamp(x_min, x_max).max(mx);
+    let y_min = my + 8;
+    let y_max = (my + mh - ph - 8).max(y_min);
+    let y = y.clamp(y_min, y_max).max(my);
     let _ = panel.set_size(PhysicalSize::new(pw as u32, ph.max(120) as u32));
     let _ = panel.set_position(PhysicalPosition::new(x, y));
 }
@@ -388,6 +396,11 @@ pub fn hide_panel(app: &AppHandle, id: u64) {
             r.panel_pinned = false;
             r.mode = PanelMode::List;
             r.pending_drop.clear();
+            // 清理 presence 和拖出状态，防止隐藏后残留状态影响下次显示
+            r.bar_inside = false;
+            r.panel_inside = false;
+            r.dragging_out = false;
+            r.last_change = None;
         }
     }
     emit_panel_pinned(app, id);
