@@ -43,7 +43,7 @@ let mockSettings: import("@/types").Settings = {
       enabled: true,
     },
   ],
-  version: "0.5.1-mock",
+  version: "0.5.4-mock",
   dataDir: "浏览器预览",
 };
 const mockMonitors: MonitorInfo[] = [
