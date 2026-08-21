@@ -384,6 +384,7 @@ pub async fn save_settings(app: AppHandle, patch: serde_json::Value) -> Result<S
         || next.hotkeys.open_panel != prev.hotkeys.open_panel
     {
         if let Err(e) = crate::hotkeys::register(&app, &next) {
+            // 回滚数据库配置
             let rolled = {
                 let conn = state.db.lock().unwrap();
                 let mut fixed = next.clone();
@@ -391,7 +392,9 @@ pub async fn save_settings(app: AppHandle, patch: serde_json::Value) -> Result<S
                 settings::persist(&conn, &fixed)?;
                 fixed
             };
-            let _ = app.emit(events::SETTINGS_CHANGED, rolled);
+            // 重新注册旧快捷键，确保实际快捷键与数据库一致
+            let _ = crate::hotkeys::register(&app, &rolled);
+            let _ = app.emit(events::SETTINGS_CHANGED, rolled.clone());
             return Err(e);
         }
     }
@@ -861,15 +864,13 @@ pub fn set_panel_size(app: AppHandle, pod_id: u64, _width: u32, height: u32) {
             let h = ((height as f64 * scale).round() as u32).clamp(160, 900);
             let resize_now = {
                 let mut guard = state.pods.lock().unwrap();
-                if let Some(r) = guard.get_mut(&pod_id) {
-                    let changed = r.panel_height != h;
-                    r.panel_height = h;
-                    // 面板可见且高度变化才调整窗口；隐藏期间只记录高度，
-                    // 下次显示时按新尺寸摆放，避免「显示后跳一下」的闪烁。
-                    changed && r.panel_visible
-                } else {
-                    false
-                }
+                // 使用 entry().or_default() 确保首次上报时也能创建运行态
+                let r = guard.entry(pod_id).or_default();
+                let changed = r.panel_height != h;
+                r.panel_height = h;
+                // 面板可见且高度变化才调整窗口；隐藏期间只记录高度，
+                // 下次显示时按新尺寸摆放，避免「显示后跳一下」的闪烁。
+                changed && r.panel_visible
             };
             if resize_now {
                 let _ = panel.set_size(PhysicalSize::new(w, h));

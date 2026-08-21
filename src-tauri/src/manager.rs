@@ -330,8 +330,8 @@ pub fn emit_panel_pinned(app: &AppHandle, id: u64) {
     }
 }
 
-/// 单一活动面板：收起除 id 外所有「可见、未固定、列表模式」的面板。
-/// 固定（panel_pinned）以及正在拖入询问/冲突解决（mode != List）的面板不受影响。
+/// 单一活动面板：收起除 id 外所有「可见、未固定、列表模式、未在拖出」的面板。
+/// 固定（panel_pinned）、正在拖入询问/冲突解决（mode != List）、正在拖出文件（dragging_out）的面板不受影响。
 /// 直接 SW_HIDE（无收起动画，Windows 自带窗口关闭动画），消除切换时的重叠竞争闪烁。
 fn dismiss_other_panels(app: &AppHandle, id: u64) {
     let state = app.state::<AppState>();
@@ -340,7 +340,11 @@ fn dismiss_other_panels(app: &AppHandle, id: u64) {
         guard
             .iter()
             .filter(|(pid, r)| {
-                **pid != id && r.panel_visible && !r.panel_pinned && r.mode == PanelMode::List
+                **pid != id
+                    && r.panel_visible
+                    && !r.panel_pinned
+                    && !r.dragging_out
+                    && r.mode == PanelMode::List
             })
             .map(|(pid, _)| *pid)
             .collect()
