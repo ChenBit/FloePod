@@ -18,6 +18,7 @@ const staging = useStagingStore();
 
 const pod = computed(() => settingsStore.pod(props.podId));
 const vertical = computed(() => pod.value?.edge === "left" || pod.value?.edge === "right");
+const horizontal = computed(() => pod.value?.edge === "top" || pod.value?.edge === "bottom");
 const hovering = ref(false);
 const accepting = ref(false);
 let hoverTimeout: number | undefined;
@@ -283,7 +284,7 @@ onBeforeUnmount(() => {
     <div class="capsule" :class="{ accepting, hovering, dragging }" :style="capsuleStyle">
       <div class="capsule-inner">
         <Transition name="fade">
-          <div v-if="accepting" class="drop-hint">松手暂存</div>
+          <div v-if="accepting" class="drop-hint" :class="{ 'drop-hint-horizontal': horizontal }">松手暂存</div>
         </Transition>
         <template v-if="!accepting">
           <div v-if="count > 0" class="count-badge">{{ count > 99 ? "99+" : count }}</div>
@@ -392,6 +393,10 @@ onBeforeUnmount(() => {
   font-weight: 650;
   color: var(--on-accent);
   white-space: nowrap;
+}
+.drop-hint-horizontal {
+  writing-mode: horizontal-tb;
+  letter-spacing: 0.2em;
 }
 
 .fade-enter-active,
