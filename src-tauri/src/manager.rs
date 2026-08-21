@@ -184,7 +184,7 @@ fn ensure_pod_windows(app: &AppHandle, pod: &Pod) {
         .skip_taskbar(true)
         .resizable(false)
         .shadow(false)
-        .focusable(false)
+        .focusable(true) // 必须可聚焦才能接收拖放事件
         .visible(false)
         .build();
     }
@@ -201,6 +201,7 @@ fn ensure_pod_windows(app: &AppHandle, pod: &Pod) {
         .skip_taskbar(true)
         .resizable(false)
         .shadow(true)
+        .focusable(true) // 必须可聚焦才能接收拖放事件
         .visible(false)
         .build();
     }
